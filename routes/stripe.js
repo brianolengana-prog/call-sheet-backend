@@ -524,17 +524,243 @@ router.post('/sync-subscription', authenticateToken, async (req, res) => {
 
 /**
  * @route   POST /api/stripe/webhook
- * @desc    Handle Stripe webhook events (optional for development)
+ * @desc    Handle Stripe webhook events for real-time subscription updates
  * @access  Public
  */
-router.post('/webhook', async (req, res) => {
-  // For development without webhooks, just acknowledge receipt
-  console.log('Webhook received (development mode):', req.body);
+router.post('/webhook', validateStripeWebhook, async (req, res) => {
+  const event = req.stripeEvent;
   
-  res.json({ 
-    received: true, 
-    message: 'Webhook received in development mode - no processing needed' 
+  console.log(`🔔 Webhook received: ${event.type}`, {
+    id: event.id,
+    type: event.type,
+    created: new Date(event.created * 1000).toISOString()
   });
+
+  try {
+    switch (event.type) {
+      case 'customer.subscription.created':
+        await handleSubscriptionCreated(event.data.object);
+        break;
+        
+      case 'customer.subscription.updated':
+        await handleSubscriptionUpdated(event.data.object);
+        break;
+        
+      case 'customer.subscription.deleted':
+        await handleSubscriptionDeleted(event.data.object);
+        break;
+        
+      case 'invoice.payment_succeeded':
+        await handlePaymentSucceeded(event.data.object);
+        break;
+        
+      case 'invoice.payment_failed':
+        await handlePaymentFailed(event.data.object);
+        break;
+        
+      case 'customer.subscription.trial_will_end':
+        await handleTrialWillEnd(event.data.object);
+        break;
+        
+      case 'checkout.session.completed':
+        await handleCheckoutCompleted(event.data.object);
+        break;
+        
+      default:
+        console.log(`⚠️ Unhandled webhook event type: ${event.type}`);
+    }
+
+    res.json({ received: true });
+    
+  } catch (error) {
+    console.error('❌ Webhook processing error:', error);
+    res.status(500).json({ 
+      error: 'Webhook processing failed',
+      message: error.message 
+    });
+  }
 });
+
+// Webhook Event Handlers
+async function handleSubscriptionCreated(subscription) {
+  console.log('✅ Subscription created:', subscription.id);
+  
+  try {
+    // Get customer info
+    const customer = await stripe.customers.retrieve(subscription.customer);
+    
+    // Determine plan type from price ID
+    const priceId = subscription.items.data[0]?.price?.id;
+    const planType = getPlanTypeFromPriceId(priceId);
+    
+    // Update user subscription in database
+    await updateUserSubscription({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeCustomerId: customer.id,
+      stripeSubscriptionId: subscription.id,
+      planId: planType,
+      status: subscription.status,
+      currentPeriodStart: new Date(subscription.current_period_start * 1000),
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end
+    });
+    
+    console.log(`✅ User ${customer.email} subscription created: ${planType}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling subscription created:', error);
+    throw error;
+  }
+}
+
+async function handleSubscriptionUpdated(subscription) {
+  console.log('🔄 Subscription updated:', subscription.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(subscription.customer);
+    const priceId = subscription.items.data[0]?.price?.id;
+    const planType = getPlanTypeFromPriceId(priceId);
+    
+    await updateUserSubscription({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeCustomerId: customer.id,
+      stripeSubscriptionId: subscription.id,
+      planId: planType,
+      status: subscription.status,
+      currentPeriodStart: new Date(subscription.current_period_start * 1000),
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end
+    });
+    
+    console.log(`✅ User ${customer.email} subscription updated: ${planType}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling subscription updated:', error);
+    throw error;
+  }
+}
+
+async function handleSubscriptionDeleted(subscription) {
+  console.log('❌ Subscription deleted:', subscription.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(subscription.customer);
+    
+    await updateUserSubscription({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeCustomerId: customer.id,
+      stripeSubscriptionId: subscription.id,
+      planId: 'free',
+      status: 'canceled',
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false
+    });
+    
+    console.log(`✅ User ${customer.email} subscription canceled`);
+    
+  } catch (error) {
+    console.error('❌ Error handling subscription deleted:', error);
+    throw error;
+  }
+}
+
+async function handlePaymentSucceeded(invoice) {
+  console.log('💰 Payment succeeded:', invoice.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(invoice.customer);
+    
+    // Record successful payment
+    await recordPayment({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeInvoiceId: invoice.id,
+      amount: invoice.amount_paid,
+      currency: invoice.currency,
+      status: 'succeeded',
+      description: `Payment for ${invoice.lines.data[0]?.description || 'subscription'}`
+    });
+    
+    console.log(`✅ Payment recorded for ${customer.email}: $${invoice.amount_paid / 100}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling payment succeeded:', error);
+    throw error;
+  }
+}
+
+async function handlePaymentFailed(invoice) {
+  console.log('💳 Payment failed:', invoice.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(invoice.customer);
+    
+    // Record failed payment
+    await recordPayment({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeInvoiceId: invoice.id,
+      amount: invoice.amount_due,
+      currency: invoice.currency,
+      status: 'failed',
+      description: `Failed payment for ${invoice.lines.data[0]?.description || 'subscription'}`
+    });
+    
+    // TODO: Send notification email to user
+    console.log(`⚠️ Payment failed for ${customer.email}: $${invoice.amount_due / 100}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling payment failed:', error);
+    throw error;
+  }
+}
+
+async function handleTrialWillEnd(subscription) {
+  console.log('⏰ Trial will end:', subscription.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(subscription.customer);
+    
+    // TODO: Send trial ending notification email
+    console.log(`⏰ Trial ending soon for ${customer.email}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling trial will end:', error);
+    throw error;
+  }
+}
+
+async function handleCheckoutCompleted(session) {
+  console.log('🛒 Checkout completed:', session.id);
+  
+  try {
+    // This is handled by subscription.created, but we can log it
+    console.log(`🛒 Checkout completed for session: ${session.id}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling checkout completed:', error);
+    throw error;
+  }
+}
+
+// Helper function to determine plan type from Stripe price ID
+function getPlanTypeFromPriceId(priceId) {
+  if (!priceId) return 'free';
+  
+  // Map your actual Stripe price IDs to plan types
+  if (priceId === 'price_1S12zqPbpfQlQm4ifa35bog2') return 'free';
+  if (priceId === 'price_1S12qRPbpfQlQm4iwqRdSTbt') return 'starter';
+  if (priceId === 'price_1S12w4PbpfQlQm4iAJOHdUEy') return 'professional';
+  if (priceId === 'price_1S12xbPbpfQlQm4ijVu9T1DJ') return 'enterprise';
+  
+  return 'unknown';
+}
+
+// Import database utility functions
+const { updateUserSubscription, recordPayment } = require('../utils/database');
 
 module.exports = router;
