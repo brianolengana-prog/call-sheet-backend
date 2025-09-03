@@ -1,6 +1,17 @@
-# CallSheet AI Stripe Backend
+# CallSheet AI Enhanced Secure Backend
 
-This is the Express.js backend server that handles all Stripe payment operations for the CallSheet AI CRM system.
+This is the Express.js backend server that handles Stripe payment operations and provides robust authentication and security features for the CallSheet AI CRM system.
+
+## 🛡️ Security Features
+
+- **Enhanced JWT Authentication** with proper signature verification
+- **Session Management** with device fingerprinting
+- **Rate Limiting** per endpoint type (auth, API, payments)
+- **Comprehensive Security Headers** (CSP, HSTS, XSS protection)
+- **Request Validation** and XSS prevention
+- **Security Event Logging** and monitoring
+- **CSRF Protection** and IP filtering
+- **Suspicious Activity Detection**
 
 ## 🚀 Quick Start
 
@@ -43,7 +54,41 @@ Frontend (React) → Express Backend → Stripe API
 
 ## 📡 API Endpoints
 
-### Authentication Required Endpoints
+## 🔐 Authentication & Security
+
+This backend implements enterprise-grade security features:
+
+### New Authentication Endpoints
+
+#### `POST /api/auth/validate`
+Validate current authentication token and retrieve user info.
+
+#### `POST /api/auth/logout`
+Logout and invalidate current session.
+
+#### `POST /api/auth/logout-all`
+Logout from all devices (invalidate all user sessions).
+
+#### `GET /api/auth/sessions`
+Get active sessions for current user.
+
+#### `GET /api/auth/profile`
+Get user profile with security information.
+
+#### `GET /api/auth/security-log` (Admin Only)
+Generate security reports and view authentication logs.
+
+### Security Middleware
+
+All endpoints are protected by:
+- Rate limiting (5 auth attempts per 15 min, 60 API requests per min)
+- Request validation and XSS prevention
+- Security headers (CSP, HSTS, X-Frame-Options)
+- Session fingerprinting
+- IP filtering and suspicious activity detection
+- Comprehensive security logging
+
+### Stripe Endpoints (Authentication Required)
 
 #### `POST /api/stripe/create-checkout-session`
 Creates a Stripe checkout session for subscription signup.

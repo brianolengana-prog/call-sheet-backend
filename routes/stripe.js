@@ -363,6 +363,25 @@ router.get('/billing-history', authenticateToken, async (req, res) => {
 });
 
 /**
+ * @route   GET /api/stripe/health
+ * @desc    Health check endpoint for CORS testing
+ * @access  Public
+ */
+router.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    service: 'Stripe API',
+    cors: {
+      origin: req.headers.origin || 'No origin header',
+      userAgent: req.headers['user-agent'] || 'No user agent',
+      method: req.method,
+      headers: req.headers
+    }
+  });
+});
+
+/**
  * @route   GET /api/stripe/plans
  * @desc    Get available subscription plans
  * @access  Public
