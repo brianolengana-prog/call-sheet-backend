@@ -455,13 +455,34 @@ router.get('/plans', async (req, res) => {
  */
 router.post('/sync-subscription', authenticateToken, async (req, res) => {
   try {
+    console.log('🔄 Sync subscription request from user:', {
+      userId: req.user?.id,
+      email: req.user?.email,
+      timestamp: new Date().toISOString()
+    });
+
+    // Validate user data
+    if (!req.user || !req.user.email) {
+      console.error('❌ No user data in request');
+      return res.status(401).json({
+        error: {
+          message: 'User authentication data missing',
+          type: 'authentication_error',
+          status: 401
+        }
+      });
+    }
+
     // Find customer by email
     const customers = await stripe.customers.list({
       email: req.user.email,
       limit: 1
     });
 
+    console.log(`🔍 Found ${customers.data.length} customers for email: ${req.user.email}`);
+
     if (customers.data.length === 0) {
+      console.log('📝 No Stripe customer found, returning free plan');
       return res.json({
         hasSubscription: false,
         plan: 'free',
@@ -470,16 +491,21 @@ router.post('/sync-subscription', authenticateToken, async (req, res) => {
     }
 
     const customer = customers.data[0];
+    console.log(`👤 Found customer: ${customer.id}`);
+    
     const subscriptions = await stripe.subscriptions.list({
       customer: customer.id,
       status: 'all'
     });
+
+    console.log(`📋 Found ${subscriptions.data.length} subscriptions for customer`);
 
     const activeSubscription = subscriptions.data.find(sub => 
       ['active', 'trialing', 'past_due'].includes(sub.status)
     );
 
     if (!activeSubscription) {
+      console.log('📝 No active subscription found, returning free plan');
       return res.json({
         hasSubscription: false,
         plan: 'free',
@@ -491,6 +517,8 @@ router.post('/sync-subscription', authenticateToken, async (req, res) => {
     let planType = 'unknown';
     const priceId = activeSubscription.items.data[0]?.price?.id;
     
+    console.log(`💳 Active subscription found: ${activeSubscription.id}, price ID: ${priceId}`);
+    
     if (priceId) {
       if (priceId.includes('starter') || priceId.includes('basic')) {
         planType = 'starter';
@@ -501,22 +529,33 @@ router.post('/sync-subscription', authenticateToken, async (req, res) => {
       }
     }
 
-    res.json({
+    const result = {
       hasSubscription: true,
       plan: planType,
       status: activeSubscription.status,
       subscriptionId: activeSubscription.id,
       currentPeriodEnd: activeSubscription.current_period_end,
       cancelAtPeriodEnd: activeSubscription.cancel_at_period_end
-    });
+    };
+
+    console.log('✅ Sync subscription result:', result);
+    res.json(result);
 
   } catch (error) {
-    console.error('Error syncing subscription:', error);
+    console.error('❌ Error syncing subscription:', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+      email: req.user?.email,
+      timestamp: new Date().toISOString()
+    });
+    
     res.status(500).json({
       error: {
         message: 'Failed to sync subscription',
         type: 'server_error',
-        status: 500
+        status: 500,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
       }
     });
   }

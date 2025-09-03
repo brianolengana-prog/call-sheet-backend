@@ -25,8 +25,10 @@ const authLogger = require('./utils/authLogger');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Trust proxy if behind reverse proxy (for proper IP detection)
-app.set('trust proxy', true);
+// Trust proxy configuration - be more specific to avoid rate limiting issues
+// In production, trust only the first proxy (Render's load balancer)
+// In development, don't trust any proxies
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
 
 // IP filtering (should be first)
 app.use(ipFilter);

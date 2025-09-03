@@ -17,8 +17,15 @@ const verifySupabaseToken = async (token) => {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     
+    console.log('🔍 JWT Verification - Environment check:', {
+      hasSupabaseUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      supabaseUrlPreview: supabaseUrl ? supabaseUrl.substring(0, 30) + '...' : 'missing'
+    });
+    
     if (!supabaseUrl || !supabaseServiceKey) {
-      console.warn('Supabase configuration missing - falling back to basic validation');
+      console.warn('❌ Supabase configuration missing - falling back to basic validation');
       return null;
     }
 
@@ -26,14 +33,33 @@ const verifySupabaseToken = async (token) => {
     // In production, you should use the actual JWT secret from Supabase
     const jwtSecret = process.env.JWT_SECRET || supabaseServiceKey;
     
+    console.log('🔑 Using JWT secret for verification:', {
+      hasJwtSecret: !!jwtSecret,
+      secretPreview: jwtSecret ? jwtSecret.substring(0, 20) + '...' : 'missing'
+    });
+    
     const decoded = jwt.verify(token, jwtSecret, {
       algorithms: ['HS256', 'RS256'],
       issuer: supabaseUrl,
       audience: 'authenticated'
     });
     
+    console.log('✅ JWT token verified successfully:', {
+      userId: decoded.sub,
+      email: decoded.email,
+      exp: decoded.exp,
+      timestamp: new Date().toISOString()
+    });
+    
     return decoded;
   } catch (error) {
+    console.error('❌ JWT verification failed:', {
+      error: error.message,
+      name: error.name,
+      tokenPreview: token ? token.substring(0, 20) + '...' : 'no token',
+      timestamp: new Date().toISOString()
+    });
+    
     if (error.name === 'TokenExpiredError') {
       throw new Error('TOKEN_EXPIRED');
     } else if (error.name === 'JsonWebTokenError') {

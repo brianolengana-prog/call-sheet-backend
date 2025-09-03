@@ -101,9 +101,19 @@ const createRateLimit = (windowMs, max, message) => {
     },
     standardHeaders: true,
     legacyHeaders: false,
+    // Fix trust proxy issue by being more specific about trusted proxies
+    trustProxy: process.env.NODE_ENV === 'production' ? 1 : false,
+    // Use a more specific key generator that works with proxies
+    keyGenerator: (req) => {
+      // Use X-Forwarded-For header if available, otherwise use IP
+      const forwarded = req.get('X-Forwarded-For');
+      const ip = forwarded ? forwarded.split(',')[0].trim() : req.ip;
+      return ip;
+    },
     handler: (req, res) => {
       console.warn('Rate limit exceeded:', {
         ip: req.ip,
+        forwardedFor: req.get('X-Forwarded-For'),
         path: req.path,
         userAgent: req.get('User-Agent'),
         timestamp: new Date().toISOString()

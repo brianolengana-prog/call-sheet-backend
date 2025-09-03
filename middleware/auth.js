@@ -46,6 +46,13 @@ const authenticateToken = async (req, res, next) => {
 
     if (!token) {
       recordAuthAttempt(rateLimitKey);
+      console.log('❌ No token provided in request:', {
+        path: req.originalUrl,
+        method: req.method,
+        headers: req.headers,
+        ip: clientIp,
+        timestamp: new Date().toISOString()
+      });
       return res.status(401).json({
         error: {
           message: 'Access token required',
@@ -59,10 +66,12 @@ const authenticateToken = async (req, res, next) => {
     if (!isValidTokenStructure(token)) {
       recordAuthAttempt(rateLimitKey);
       
-      console.warn('Invalid token structure attempt', {
+      console.warn('❌ Invalid token structure attempt', {
         ip: clientIp,
         userAgent,
         tokenPreview: token.substring(0, 20) + '...',
+        path: req.originalUrl,
+        method: req.method,
         timestamp: new Date().toISOString()
       });
       
@@ -79,6 +88,14 @@ const authenticateToken = async (req, res, next) => {
     if (isTokenExpired(token)) {
       recordAuthAttempt(rateLimitKey);
       
+      console.warn('❌ Expired token attempt', {
+        ip: clientIp,
+        userAgent,
+        path: req.originalUrl,
+        method: req.method,
+        timestamp: new Date().toISOString()
+      });
+      
       return res.status(401).json({
         error: {
           message: 'Token expired',
@@ -93,9 +110,12 @@ const authenticateToken = async (req, res, next) => {
     if (!user) {
       recordAuthAttempt(rateLimitKey);
       
-      console.warn('Token extraction failed', {
+      console.warn('❌ Token extraction failed', {
         ip: clientIp,
         userAgent,
+        path: req.originalUrl,
+        method: req.method,
+        tokenPreview: token.substring(0, 20) + '...',
         timestamp: new Date().toISOString()
       });
       
@@ -134,10 +154,12 @@ const authenticateToken = async (req, res, next) => {
       'X-Session-ID': sessionId.substring(0, 8) + '...' // Partial session ID for debugging
     });
 
-    // Log successful authentication (in development only)
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`Authentication successful for user ${user.id} (${user.email})`);
-    }
+    // Log successful authentication
+    console.log(`✅ Authentication successful for user ${user.id} (${user.email})`, {
+      path: req.originalUrl,
+      method: req.method,
+      timestamp: new Date().toISOString()
+    });
 
     next();
 
