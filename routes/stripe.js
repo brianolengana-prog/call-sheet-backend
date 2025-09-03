@@ -2,6 +2,7 @@ const express = require('express');
 const Stripe = require('stripe');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const { validateStripeWebhook } = require('../middleware/stripeWebhook');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -449,6 +450,167 @@ router.get('/plans', async (req, res) => {
 });
 
 /**
+ * @route   POST /api/stripe/retry-payment
+ * @desc    Retry a failed payment
+ * @access  Private
+ */
+router.post('/retry-payment', authenticateToken, async (req, res) => {
+  try {
+    const { invoiceId } = req.body;
+
+    if (!invoiceId) {
+      return res.status(400).json({
+        error: {
+          message: 'Invoice ID is required',
+          type: 'validation_error',
+          status: 400
+        }
+      });
+    }
+
+    console.log('🔄 Retry payment request:', {
+      invoiceId,
+      userId: req.user?.id,
+      email: req.user?.email,
+      timestamp: new Date().toISOString()
+    });
+
+    // Get the invoice from Stripe
+    const invoice = await stripe.invoices.retrieve(invoiceId);
+    
+    // Verify the invoice belongs to the user
+    const customer = await stripe.customers.retrieve(invoice.customer);
+    if (customer.metadata?.userId !== req.user.id) {
+      return res.status(403).json({
+        error: {
+          message: 'Access denied to this invoice',
+          type: 'authorization_error',
+          status: 403
+        }
+      });
+    }
+
+    // Create a new payment intent for the invoice
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: invoice.amount_due,
+      currency: invoice.currency,
+      customer: customer.id,
+      description: `Retry payment for ${invoice.lines.data[0]?.description || 'subscription'}`,
+      metadata: {
+        userId: req.user.id,
+        invoiceId: invoice.id,
+        retryAttempt: true
+      }
+    });
+
+    // Create a checkout session for payment retry
+    const session = await stripe.checkout.sessions.create({
+      customer: customer.id,
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: invoice.currency,
+          product_data: {
+            name: `Retry Payment - ${invoice.lines.data[0]?.description || 'Subscription'}`,
+          },
+          unit_amount: invoice.amount_due,
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL}/billing?retry_success=true&invoice=${invoice.id}`,
+      cancel_url: `${process.env.FRONTEND_URL}/billing?retry_canceled=true&invoice=${invoice.id}`,
+      metadata: {
+        userId: req.user.id,
+        invoiceId: invoice.id,
+        type: 'payment_retry'
+      }
+    });
+
+    console.log('✅ Payment retry session created:', session.id);
+
+    res.json({
+      id: session.id,
+      url: session.url,
+      amount_total: session.amount_total,
+      currency: session.currency,
+      invoiceId: invoice.id
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating payment retry session:', error);
+    res.status(500).json({
+      error: {
+        message: 'Failed to create payment retry session',
+        type: 'server_error',
+        status: 500,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      }
+    });
+  }
+});
+
+/**
+ * @route   GET /api/stripe/failed-payments
+ * @desc    Get failed payments for the current user
+ * @access  Private
+ */
+router.get('/failed-payments', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 Getting failed payments for user:', req.user?.id);
+
+    // Find customer by email
+    const customers = await stripe.customers.list({
+      email: req.user.email,
+      limit: 1
+    });
+
+    if (customers.data.length === 0) {
+      return res.json([]);
+    }
+
+    const customer = customers.data[0];
+    
+    // Get failed invoices
+    const invoices = await stripe.invoices.list({
+      customer: customer.id,
+      status: 'open',
+      limit: 10
+    });
+
+    const failedPayments = invoices.data
+      .filter(invoice => invoice.amount_due > 0)
+      .map(invoice => ({
+        id: invoice.id,
+        amount: invoice.amount_due,
+        currency: invoice.currency,
+        description: invoice.lines.data[0]?.description || 'Subscription payment',
+        failureReason: invoice.last_payment_error?.message,
+        failureCode: invoice.last_payment_error?.code,
+        created: invoice.created,
+        dueDate: invoice.due_date,
+        hostedInvoiceUrl: invoice.hosted_invoice_url,
+        invoicePdf: invoice.invoice_pdf
+      }));
+
+    console.log(`📋 Found ${failedPayments.length} failed payments for ${req.user.email}`);
+
+    res.json(failedPayments);
+
+  } catch (error) {
+    console.error('❌ Error getting failed payments:', error);
+    res.status(500).json({
+      error: {
+        message: 'Failed to get failed payments',
+        type: 'server_error',
+        status: 500,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      }
+    });
+  }
+});
+
+/**
  * @route   POST /api/stripe/sync-subscription
  * @desc    Manually sync subscription status (alternative to webhooks)
  * @access  Private
@@ -561,6 +723,112 @@ router.post('/sync-subscription', authenticateToken, async (req, res) => {
   }
 });
 
+// Webhook idempotency tracking
+const webhookIdempotency = new Map();
+
+/**
+ * Process webhook with retry logic and idempotency
+ */
+async function processWebhookWithRetry(event, maxRetries = 3) {
+  const key = `${event.id}_${event.type}`;
+  
+  // Check if webhook was already processed
+  if (webhookIdempotency.has(key)) {
+    const cached = webhookIdempotency.get(key);
+    console.log(`✅ Webhook ${event.id} already processed at ${new Date(cached.timestamp).toISOString()}`);
+    return { processed: true, fromCache: true, timestamp: cached.timestamp };
+  }
+  
+  // Process with retry logic
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔄 Processing webhook ${event.id} (attempt ${attempt}/${maxRetries})`);
+      await processWebhookEvent(event);
+      
+      // Mark as processed
+      webhookIdempotency.set(key, { 
+        processed: true, 
+        timestamp: Date.now(),
+        attempt 
+      });
+      
+      console.log(`✅ Webhook ${event.id} processed successfully on attempt ${attempt}`);
+      return { processed: true, attempt, timestamp: Date.now() };
+      
+    } catch (error) {
+      console.error(`❌ Webhook ${event.id} attempt ${attempt} failed:`, error.message);
+      
+      if (attempt === maxRetries) {
+        console.error(`💥 Webhook ${event.id} failed after ${maxRetries} attempts`);
+        throw error;
+      }
+      
+      // Exponential backoff
+      const delay = 1000 * Math.pow(2, attempt - 1);
+      console.log(`⏳ Retrying webhook ${event.id} in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
+/**
+ * Process individual webhook event
+ */
+async function processWebhookEvent(event) {
+  switch (event.type) {
+    case 'customer.subscription.created':
+      await handleSubscriptionCreated(event.data.object);
+      break;
+      
+    case 'customer.subscription.updated':
+      await handleSubscriptionUpdated(event.data.object);
+      break;
+      
+    case 'customer.subscription.deleted':
+      await handleSubscriptionDeleted(event.data.object);
+      break;
+      
+    case 'invoice.payment_succeeded':
+      await handlePaymentSucceeded(event.data.object);
+      break;
+      
+    case 'invoice.payment_failed':
+      await handlePaymentFailed(event.data.object);
+      break;
+      
+    case 'invoice.payment_action_required':
+      await handlePaymentActionRequired(event.data.object);
+      break;
+      
+    case 'customer.subscription.past_due':
+      await handleSubscriptionPastDue(event.data.object);
+      break;
+      
+    case 'customer.subscription.trial_will_end':
+      await handleTrialWillEnd(event.data.object);
+      break;
+      
+    case 'checkout.session.completed':
+      await handleCheckoutCompleted(event.data.object);
+      break;
+      
+    case 'payment_intent.succeeded':
+      await handlePaymentIntentSucceeded(event.data.object);
+      break;
+      
+    case 'payment_intent.payment_failed':
+      await handlePaymentIntentFailed(event.data.object);
+      break;
+      
+    case 'invoice.upcoming':
+      await handleInvoiceUpcoming(event.data.object);
+      break;
+      
+    default:
+      console.log(`⚠️ Unhandled webhook event type: ${event.type}`);
+  }
+}
+
 /**
  * @route   POST /api/stripe/webhook
  * @desc    Handle Stripe webhook events for real-time subscription updates
@@ -576,46 +844,23 @@ router.post('/webhook', validateStripeWebhook, async (req, res) => {
   });
 
   try {
-    switch (event.type) {
-      case 'customer.subscription.created':
-        await handleSubscriptionCreated(event.data.object);
-        break;
-        
-      case 'customer.subscription.updated':
-        await handleSubscriptionUpdated(event.data.object);
-        break;
-        
-      case 'customer.subscription.deleted':
-        await handleSubscriptionDeleted(event.data.object);
-        break;
-        
-      case 'invoice.payment_succeeded':
-        await handlePaymentSucceeded(event.data.object);
-        break;
-        
-      case 'invoice.payment_failed':
-        await handlePaymentFailed(event.data.object);
-        break;
-        
-      case 'customer.subscription.trial_will_end':
-        await handleTrialWillEnd(event.data.object);
-        break;
-        
-      case 'checkout.session.completed':
-        await handleCheckoutCompleted(event.data.object);
-        break;
-        
-      default:
-        console.log(`⚠️ Unhandled webhook event type: ${event.type}`);
-    }
-
-    res.json({ received: true });
+    const result = await processWebhookWithRetry(event);
+    
+    res.json({ 
+      received: true,
+      processed: result.processed,
+      fromCache: result.fromCache || false,
+      attempt: result.attempt,
+      timestamp: result.timestamp
+    });
     
   } catch (error) {
     console.error('❌ Webhook processing error:', error);
     res.status(500).json({ 
       error: 'Webhook processing failed',
-      message: error.message 
+      message: error.message,
+      webhookId: event.id,
+      webhookType: event.type
     });
   }
 });
@@ -738,7 +983,7 @@ async function handlePaymentFailed(invoice) {
   try {
     const customer = await stripe.customers.retrieve(invoice.customer);
     
-    // Record failed payment
+    // Record failed payment with detailed error information
     await recordPayment({
       userId: customer.metadata?.userId,
       customerEmail: customer.email,
@@ -746,11 +991,43 @@ async function handlePaymentFailed(invoice) {
       amount: invoice.amount_due,
       currency: invoice.currency,
       status: 'failed',
-      description: `Failed payment for ${invoice.lines.data[0]?.description || 'subscription'}`
+      description: `Failed payment for ${invoice.lines.data[0]?.description || 'subscription'}`,
+      failureReason: invoice.last_payment_error?.message,
+      failureCode: invoice.last_payment_error?.code,
+      failureType: invoice.last_payment_error?.type,
+      metadata: {
+        invoiceId: invoice.id,
+        customerId: customer.id,
+        failureDetails: invoice.last_payment_error
+      }
     });
     
-    // TODO: Send notification email to user
-    console.log(`⚠️ Payment failed for ${customer.email}: $${invoice.amount_due / 100}`);
+    // Update subscription status if needed
+    if (invoice.subscription) {
+      const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+      if (subscription.status === 'past_due') {
+        await updateUserSubscription({
+          userId: customer.metadata?.userId,
+          customerEmail: customer.email,
+          stripeCustomerId: customer.id,
+          stripeSubscriptionId: subscription.id,
+          planId: getPlanTypeFromPriceId(subscription.items.data[0]?.price?.id),
+          status: 'past_due',
+          currentPeriodStart: new Date(subscription.current_period_start * 1000),
+          currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+          cancelAtPeriodEnd: subscription.cancel_at_period_end
+        });
+      }
+    }
+    
+    // Send notification email to user
+    await notificationService.sendPaymentFailureNotification(customer.email, {
+      amount: invoice.amount_due,
+      failureReason: invoice.last_payment_error?.message,
+      retryUrl: `${process.env.FRONTEND_URL}/billing?retry_payment=${invoice.id}`
+    });
+    
+    console.log(`⚠️ Payment failed for ${customer.email}: $${invoice.amount_due / 100} - ${invoice.last_payment_error?.message}`);
     
   } catch (error) {
     console.error('❌ Error handling payment failed:', error);
@@ -764,7 +1041,12 @@ async function handleTrialWillEnd(subscription) {
   try {
     const customer = await stripe.customers.retrieve(subscription.customer);
     
-    // TODO: Send trial ending notification email
+    // Send trial ending notification email
+    await notificationService.sendTrialEndingNotification(customer.email, {
+      daysLeft: Math.ceil((subscription.trial_end - Date.now() / 1000) / (24 * 60 * 60)),
+      upgradeUrl: `${process.env.FRONTEND_URL}/billing`
+    });
+    
     console.log(`⏰ Trial ending soon for ${customer.email}`);
     
   } catch (error) {
@@ -782,6 +1064,129 @@ async function handleCheckoutCompleted(session) {
     
   } catch (error) {
     console.error('❌ Error handling checkout completed:', error);
+    throw error;
+  }
+}
+
+async function handlePaymentActionRequired(invoice) {
+  console.log('⚠️ Payment action required:', invoice.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(invoice.customer);
+    
+    // Record the payment action required event
+    await recordPayment({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeInvoiceId: invoice.id,
+      amount: invoice.amount_due,
+      currency: invoice.currency,
+      status: 'action_required',
+      description: `Payment action required for ${invoice.lines.data[0]?.description || 'subscription'}`,
+      failureReason: invoice.last_payment_error?.message,
+      failureCode: invoice.last_payment_error?.code
+    });
+    
+    // Send notification email to user about required action
+    await notificationService.sendPaymentActionRequiredNotification(customer.email, {
+      amount: invoice.amount_due,
+      failureReason: invoice.last_payment_error?.message,
+      actionUrl: `${process.env.FRONTEND_URL}/billing?action_required=${invoice.id}`
+    });
+    
+    console.log(`⚠️ Payment action required for ${customer.email}: $${invoice.amount_due / 100}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling payment action required:', error);
+    throw error;
+  }
+}
+
+async function handleSubscriptionPastDue(subscription) {
+  console.log('🚨 Subscription past due:', subscription.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(subscription.customer);
+    
+    // Update subscription status to past_due
+    await updateUserSubscription({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeCustomerId: customer.id,
+      stripeSubscriptionId: subscription.id,
+      planId: getPlanTypeFromPriceId(subscription.items.data[0]?.price?.id),
+      status: 'past_due',
+      currentPeriodStart: new Date(subscription.current_period_start * 1000),
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end
+    });
+    
+    // Send urgent notification email
+    await notificationService.sendPaymentFailureNotification(customer.email, {
+      amount: 0, // We don't have the specific amount here
+      failureReason: 'Subscription is past due',
+      retryUrl: `${process.env.FRONTEND_URL}/billing`
+    });
+    
+    console.log(`🚨 Subscription past due for ${customer.email}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling subscription past due:', error);
+    throw error;
+  }
+}
+
+async function handlePaymentIntentSucceeded(paymentIntent) {
+  console.log('💳 Payment intent succeeded:', paymentIntent.id);
+  
+  try {
+    // This is typically handled by invoice.payment_succeeded, but we can log it
+    console.log(`💳 Payment intent succeeded: ${paymentIntent.id}, amount: $${paymentIntent.amount / 100}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling payment intent succeeded:', error);
+    throw error;
+  }
+}
+
+async function handlePaymentIntentFailed(paymentIntent) {
+  console.log('💳 Payment intent failed:', paymentIntent.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(paymentIntent.customer);
+    
+    // Record failed payment intent
+    await recordPayment({
+      userId: customer.metadata?.userId,
+      customerEmail: customer.email,
+      stripeInvoiceId: paymentIntent.id,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      status: 'failed',
+      description: `Failed payment intent: ${paymentIntent.description || 'subscription payment'}`,
+      failureReason: paymentIntent.last_payment_error?.message,
+      failureCode: paymentIntent.last_payment_error?.code
+    });
+    
+    console.log(`💳 Payment intent failed for ${customer.email}: $${paymentIntent.amount / 100}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling payment intent failed:', error);
+    throw error;
+  }
+}
+
+async function handleInvoiceUpcoming(invoice) {
+  console.log('📅 Invoice upcoming:', invoice.id);
+  
+  try {
+    const customer = await stripe.customers.retrieve(invoice.customer);
+    
+    // TODO: Send upcoming invoice notification
+    console.log(`📅 Upcoming invoice for ${customer.email}: $${invoice.amount_due / 100} due ${new Date(invoice.period_end * 1000).toLocaleDateString()}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling invoice upcoming:', error);
     throw error;
   }
 }

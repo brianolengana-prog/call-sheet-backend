@@ -195,6 +195,12 @@ async function recordPayment(data) {
       currency: data.currency,
       status: data.status,
       description: data.description,
+      metadata: {
+        failureReason: data.failureReason,
+        failureCode: data.failureCode,
+        failureType: data.failureType,
+        ...data.metadata
+      },
       created_at: new Date().toISOString()
     };
 
