@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const stripeRoutes = require('./routes/stripe');
+const stripeAdminRoutes = require('./routes/stripe-admin');
 const authRoutes = require('./routes/auth');
 const googleAuthRoutes = require('./routes/googleAuth');
 const clerkWebhookRoutes = require('./routes/clerkWebhooks');
@@ -68,7 +69,10 @@ const allowedOrigins = [
   'http://localhost:3000', // React dev server
   'https://sjcallsheets-project.vercel.app', // Production frontend
   'https://sjcallsheets-project-git-main-servi.vercel.app', // Vercel preview
-  'https://*.vercel.app' // Vercel preview domains
+  'https://*.vercel.app', // Vercel preview domains
+  'https://www.callsheetconvert.com', // Live production domain
+  'https://callsheetconvert.com',
+  'https://www.callsheetconverter.com'
 ];
 
 // Log CORS configuration on startup
@@ -139,6 +143,7 @@ app.use('/api/auth', authRateLimit, authRoutes);
 app.use('/api/google-auth', authRateLimit, googleAuthRoutes);
 app.use('/api/clerk', clerkWebhookRoutes); // No rate limiting for webhooks
 app.use('/api/stripe', stripeRateLimit, stripeRoutes);
+app.use('/api/stripe-admin', stripeRateLimit, stripeAdminRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
