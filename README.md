@@ -1,251 +1,124 @@
-# CallSheet AI Enhanced Secure Backend
+# Call Sheet Converter Backend
 
-This is the Express.js backend server that handles Stripe payment operations and provides robust authentication and security features for the CallSheet AI CRM system.
-
-## 🛡️ Security Features
-
-- **Enhanced JWT Authentication** with proper signature verification
-- **Session Management** with device fingerprinting
-- **Rate Limiting** per endpoint type (auth, API, payments)
-- **Comprehensive Security Headers** (CSP, HSTS, XSS protection)
-- **Request Validation** and XSS prevention
-- **Security Event Logging** and monitoring
-- **CSRF Protection** and IP filtering
-- **Suspicious Activity Detection**
-
-## 🚀 Quick Start
+## Setup Instructions
 
 ### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 2. Set Up Environment Variables
-Copy the environment template and fill in your values:
-```bash
-cp env.template .env
-```
+### 2. Environment Configuration
+Create a `.env` file in the backend directory with the following variables:
 
-**Required Environment Variables:**
-- `STRIPE_SECRET_KEY` - Your Stripe secret key
-- `STRIPE_WEBHOOK_SECRET` - Webhook endpoint secret from Stripe
-- `FRONTEND_URL` - Your React frontend URL (default: http://localhost:3000)
+```env
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# Frontend URL
+FRONTEND_URL=http://localhost:5173
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+JWT_EXPIRY=24h
+REFRESH_TOKEN_EXPIRY=7d
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:5173/auth/callback
+
+# Email Configuration (Optional - for password reset and verification emails)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=noreply@yourdomain.com
+
+# Security Configuration
+CORS_ORIGIN=http://localhost:5173
+TRUST_PROXY=false
+```
 
 ### 3. Start the Server
 ```bash
-# Development mode (with auto-reload)
-npm run dev
-
-# Production mode
 npm start
 ```
 
-The server will run on port 3001 by default.
+## Features
 
-## 🏗️ Architecture
-
-```
-Frontend (React) → Express Backend → Stripe API
-                ↓
-            Payment Processing
-            Subscription Management
-            Webhook Handling
-```
-
-## 📡 API Endpoints
-
-## 🔐 Authentication & Security
-
-This backend implements enterprise-grade security features:
-
-### New Authentication Endpoints
-
-#### `POST /api/auth/validate`
-Validate current authentication token and retrieve user info.
-
-#### `POST /api/auth/logout`
-Logout and invalidate current session.
-
-#### `POST /api/auth/logout-all`
-Logout from all devices (invalidate all user sessions).
-
-#### `GET /api/auth/sessions`
-Get active sessions for current user.
-
-#### `GET /api/auth/profile`
-Get user profile with security information.
-
-#### `GET /api/auth/security-log` (Admin Only)
-Generate security reports and view authentication logs.
-
-### Security Middleware
-
-All endpoints are protected by:
-- Rate limiting (5 auth attempts per 15 min, 60 API requests per min)
-- Request validation and XSS prevention
-- Security headers (CSP, HSTS, X-Frame-Options)
-- Session fingerprinting
-- IP filtering and suspicious activity detection
-- Comprehensive security logging
-
-### Stripe Endpoints (Authentication Required)
-
-#### `POST /api/stripe/create-checkout-session`
-Creates a Stripe checkout session for subscription signup.
-
-**Request Body:**
-```json
-{
-  "priceId": "price_starter_monthly",
-  "successUrl": "http://localhost:3000/billing?success=true",
-  "cancelUrl": "http://localhost:3000/billing?canceled=true",
-  "customerEmail": "user@example.com",
-  "metadata": {
-    "planId": "starter"
-  }
-}
-```
-
-#### `POST /api/stripe/create-portal-session`
-Creates a Stripe customer portal session for subscription management.
-
-**Request Body:**
-```json
-{
-  "returnUrl": "http://localhost:3000/billing"
-}
-```
-
-#### `GET /api/stripe/customer`
-Retrieves customer information and subscription details.
-
-#### `POST /api/stripe/cancel-subscription`
-Cancels a user's subscription.
-
-**Request Body:**
-```json
-{
-  "subscriptionId": "sub_..."
-}
-```
-
-#### `POST /api/stripe/update-subscription`
-Changes a user's subscription plan.
-
-**Request Body:**
-```json
-{
-  "subscriptionId": "sub_...",
-  "newPriceId": "price_professional_monthly"
-}
-```
-
-#### `GET /api/stripe/billing-history`
-Retrieves customer billing history.
-
-### Public Endpoints
-
-#### `GET /api/stripe/plans`
-Retrieves available subscription plans from Stripe.
-
-#### `POST /api/stripe/webhook`
-Handles Stripe webhook events (requires webhook signature verification).
-
-## 🔐 Authentication
-
-The backend uses JWT tokens from Supabase for authentication. Include the token in the Authorization header:
-
-```
-Authorization: Bearer <your-jwt-token>
-```
-
-## 🛡️ Security Features
-
-- **Helmet.js** - Security headers
-- **Rate Limiting** - Prevents abuse
-- **CORS Protection** - Configurable origins
-- **Webhook Verification** - Stripe signature validation
-- **Input Validation** - Request body validation
-
-## 🧪 Testing
-
-### Health Check
-```bash
-curl http://localhost:3001/health
-```
-
-### Test Stripe Endpoints
-```bash
-# Get available plans
-curl http://localhost:3001/api/stripe/plans
-
-# Health check
-curl http://localhost:3001/health
-```
-
-## 🔧 Development
-
-### File Structure
-```
-backend/
-├── middleware/
-│   ├── auth.js              # JWT authentication
-│   ├── errorHandler.js      # Global error handling
-│   └── stripeWebhook.js     # Webhook validation
-├── routes/
-│   └── stripe.js            # Stripe API routes
-├── server.js                # Main server file
-├── package.json             # Dependencies
-├── env.template             # Environment variables template
-└── README.md                # This file
-```
-
-### Adding New Routes
-1. Create a new route file in `routes/`
-2. Import and use it in `server.js`
-3. Add appropriate middleware (auth, validation, etc.)
-
-### Error Handling
-All errors are caught by the global error handler middleware and formatted consistently.
-
-## 🚀 Deployment
-
-### Environment Variables
-Ensure all required environment variables are set in production.
+### Authentication
+- **Email/Password Authentication**: Complete registration and login flow
+- **Google OAuth**: Seamless Google sign-in integration
+- **Password Reset**: Secure password reset with email tokens
+- **Email Verification**: Email verification for new accounts
+- **JWT Tokens**: Secure token-based authentication
+- **Account Lockout**: Brute force protection
 
 ### Security
-- Use strong JWT secrets
+- **CSRF Protection**: Cross-site request forgery protection
+- **Rate Limiting**: Per-endpoint rate limiting
+- **Input Validation**: Server-side validation for all inputs
+- **Secure Headers**: Helmet.js security headers
+- **Password Hashing**: bcrypt with 12 salt rounds
+
+### Email Service
+- **Password Reset Emails**: Professional HTML email templates
+- **Verification Emails**: Email verification with secure tokens
+- **Security Alerts**: Automated security notifications
+- **Graceful Degradation**: Works without email configuration
+
+## API Endpoints
+
+### Authentication
+- `POST /api/auth/login` - Email/password login
+- `POST /api/auth/register` - User registration
+- `POST /api/auth/logout` - User logout
+- `GET /api/auth/me` - Get current user
+- `POST /api/auth/refresh` - Refresh tokens
+
+### Password Management
+- `POST /api/auth/forgot-password` - Request password reset
+- `POST /api/auth/reset-password` - Reset password with token
+
+### Email Verification
+- `POST /api/auth/verify-email` - Verify email with token
+- `POST /api/auth/resend-verification` - Resend verification email
+
+### Google OAuth
+- `POST /api/google-auth/google/callback` - Google OAuth callback
+- `GET /api/google-auth/me` - Get Google user info
+- `POST /api/google-auth/signout` - Google logout
+
+### Security
+- `GET /api/auth/security-audit` - Get security audit log
+
+## Development Notes
+
+### Email Configuration
+The email service is optional and will gracefully degrade if not configured. When email is not configured:
+- Password reset tokens are logged to the console
+- Verification tokens are logged to the console
+- Security alerts are logged to the console
+
+### Database
+Currently uses in-memory storage for demo purposes. For production:
+- Replace in-memory storage with a proper database
+- Implement proper user management
+- Add data persistence for tokens and sessions
+
+### Security
+- Change JWT_SECRET in production
+- Use environment variables for all sensitive data
 - Enable HTTPS in production
-- Set appropriate CORS origins
-- Configure rate limiting for production load
+- Configure proper CORS origins
 
-### Monitoring
-- Health check endpoint: `/health`
-- Error logging to console
-- Stripe webhook event logging
+## Production Deployment
 
-## 🔗 Integration with Frontend
-
-The frontend should:
-1. Send JWT tokens in Authorization headers
-2. Handle Stripe checkout redirects
-3. Process webhook events for real-time updates
-4. Use the billing endpoints for subscription management
-
-## 📚 Resources
-
-- [Stripe API Documentation](https://stripe.com/docs/api)
-- [Express.js Documentation](https://expressjs.com/)
-- [Supabase Documentation](https://supabase.com/docs)
-
-## 🆘 Troubleshooting
-
-### Common Issues
-
-1. **CORS Errors**: Check `FRONTEND_URL` in environment variables
-2. **Authentication Failures**: Verify JWT token format and expiration
-3. **Stripe Errors**: Check `STRIPE_SECRET_KEY` and API version
-4. **Webhook Failures**: Verify `STRIPE_WEBHOOK_SECRET`
-
-### Logs
-Check console output for detailed error messages and Stripe webhook events.
+1. Set up a proper database (PostgreSQL recommended)
+2. Configure email service with a reliable provider
+3. Set up environment variables
+4. Enable HTTPS
+5. Configure proper CORS origins
+6. Set up monitoring and logging
+7. Implement proper backup strategies

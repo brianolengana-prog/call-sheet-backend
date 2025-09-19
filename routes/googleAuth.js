@@ -1,13 +1,11 @@
-const express = require('express');
-const { google } = require('googleapis');
-const router = express.Router();
+/**
+ * Google OAuth Routes
+ * Handles Google OAuth authentication
+ */
 
-// Google OAuth configuration
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL}/auth/callback`
-);
+const express = require('express');
+const authService = require('../services/authService');
+const router = express.Router();
 
 // Handle Google OAuth callback
 router.post('/google/callback', async (req, res) => {
@@ -15,57 +13,57 @@ router.post('/google/callback', async (req, res) => {
     const { code } = req.body;
 
     if (!code) {
-      return res.status(400).json({ error: 'Authorization code is required' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Authorization code is required' 
+      });
     }
 
-    // Exchange code for tokens
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
+    console.log('🔐 Processing Google OAuth callback');
 
-    // Get user info
-    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-    const { data: userInfo } = await oauth2.userinfo.get();
+    // Use auth service to handle Google OAuth
+    const result = await authService.handleGoogleCallback(code);
+    
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+    const { user, session } = result;
 
     // Set secure HTTP-only cookies for tokens
-    console.log('🍪 Setting cookies for user:', userInfo.email);
-    console.log('🔒 Environment:', process.env.NODE_ENV);
-    
-    res.cookie('google_access_token', tokens.access_token, {
+    console.log('🍪 Setting cookies for user:', user.email);
+    res.cookie('auth_access_token', session.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 3600000 // 1 hour
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
-    
-    if (tokens.refresh_token) {
-      res.cookie('google_refresh_token', tokens.refresh_token, {
+
+    if (session.refreshToken) {
+      res.cookie('auth_refresh_token', session.refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
       });
     }
-    
-    console.log('✅ Cookies set successfully');
-    
-    // Return user info and token (for cross-origin compatibility)
+
+    console.log('✅ Google OAuth successful for:', user.email);
+
+    // Return user info and tokens for cross-origin compatibility
     res.json({
       success: true,
-      access_token: tokens.access_token, // Include token for cross-origin requests
-      refresh_token: tokens.refresh_token,
-      user: {
-        id: userInfo.id,
-        email: userInfo.email,
-        name: userInfo.name,
-        picture: userInfo.picture
-      }
+      user,
+      session
     });
-
   } catch (error) {
-    console.error('Google OAuth callback error:', error);
+    console.error('❌ Google OAuth error:', error);
     res.status(500).json({ 
-      error: 'Authentication failed',
-      message: error.message 
+      success: false,
+      error: error.message || 'Google OAuth failed' 
     });
   }
 });
@@ -73,57 +71,86 @@ router.post('/google/callback', async (req, res) => {
 // Get current user info from cookies or Authorization header
 router.get('/me', async (req, res) => {
   try {
-    console.log('🍪 Cookies received:', req.cookies);
-    console.log('🔍 Headers:', req.headers);
+    console.log('🔍 Auth check request received');
     
-    // Try to get token from cookies first, then from Authorization header
-    let accessToken = req.cookies.google_access_token;
-    
-    if (!accessToken) {
-      // Check Authorization header for Bearer token
-      const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        accessToken = authHeader.substring(7);
-        console.log('🔑 Token found in Authorization header');
-      }
-    } else {
-      console.log('🍪 Token found in cookies');
-    }
-    
-    if (!accessToken) {
-      console.log('❌ No access token found in cookies or headers');
-      return res.status(401).json({ error: 'Not authenticated - no access token' });
+    // Get token from Authorization header or cookies
+    let token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      token = req.cookies.auth_access_token;
     }
 
-    console.log('✅ Access token found, verifying with Google...');
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'No authentication token provided'
+      });
+    }
 
-    // Verify token with Google
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-    const { data: userInfo } = await oauth2.userinfo.get();
+    // Verify token using auth service
+    const result = await authService.verifyAccessToken(token);
+    
+    if (!result.success) {
+      return res.status(401).json({
+        success: false,
+        error: result.error
+      });
+    }
 
-    console.log('✅ User verified:', userInfo.email);
+    // Create session object for response
+    const session = {
+      user: result.user,
+      accessToken: token,
+      expiresAt: Date.now() + (24 * 60 * 60 * 1000), // 24 hours
+      isActive: true
+    };
 
+    console.log('✅ User authenticated:', result.user.email);
+    
     res.json({
-      user: {
-        id: userInfo.id,
-        email: userInfo.email,
-        name: userInfo.name,
-        picture: userInfo.picture
-      }
+      success: true,
+      user: result.user,
+      session
     });
-
   } catch (error) {
-    console.error('❌ Get user info error:', error);
-    res.status(401).json({ error: 'Invalid token' });
+    console.error('❌ Auth check error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
   }
 });
 
 // Sign out - clear cookies
 router.post('/signout', (req, res) => {
-  res.clearCookie('google_access_token');
-  res.clearCookie('google_refresh_token');
-  res.json({ success: true });
+  try {
+    console.log('🚪 Google OAuth signout request');
+    
+    // Clear cookies
+    res.clearCookie('auth_access_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    });
+    
+    res.clearCookie('auth_refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    });
+
+    console.log('✅ Google OAuth signout successful');
+    
+    res.json({ 
+      success: true,
+      message: 'Signed out successfully'
+    });
+  } catch (error) {
+    console.error('❌ Google OAuth signout error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Signout failed'
+    });
+  }
 });
 
 module.exports = router;
