@@ -60,7 +60,8 @@ const csrfProtection = (req, res, next) => {
   if (req.method === 'GET' || 
       req.path.includes('/webhook') || 
       req.path.includes('/google/callback') ||
-      req.path.includes('/oauth/callback')) {
+      req.path.includes('/oauth/callback') ||
+      req.path.includes('/google-auth/me')) {
     return next();
   }
 

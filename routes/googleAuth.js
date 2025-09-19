@@ -27,10 +27,13 @@ router.post('/google/callback', async (req, res) => {
     const { data: userInfo } = await oauth2.userinfo.get();
 
     // Set secure HTTP-only cookies for tokens
+    console.log('🍪 Setting cookies for user:', userInfo.email);
+    console.log('🔒 Environment:', process.env.NODE_ENV);
+    
     res.cookie('google_access_token', tokens.access_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax',
       maxAge: 3600000 // 1 hour
     });
     
@@ -38,14 +41,18 @@ router.post('/google/callback', async (req, res) => {
       res.cookie('google_refresh_token', tokens.refresh_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: 'lax',
         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
       });
     }
     
-    // Return only user info (no tokens in response)
+    console.log('✅ Cookies set successfully');
+    
+    // Return user info and token (for cross-origin compatibility)
     res.json({
       success: true,
+      access_token: tokens.access_token, // Include token for cross-origin requests
+      refresh_token: tokens.refresh_token,
       user: {
         id: userInfo.id,
         email: userInfo.email,
@@ -63,19 +70,39 @@ router.post('/google/callback', async (req, res) => {
   }
 });
 
-// Get current user info from cookies
+// Get current user info from cookies or Authorization header
 router.get('/me', async (req, res) => {
   try {
-    const accessToken = req.cookies.google_access_token;
+    console.log('🍪 Cookies received:', req.cookies);
+    console.log('🔍 Headers:', req.headers);
+    
+    // Try to get token from cookies first, then from Authorization header
+    let accessToken = req.cookies.google_access_token;
     
     if (!accessToken) {
-      return res.status(401).json({ error: 'Not authenticated' });
+      // Check Authorization header for Bearer token
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        accessToken = authHeader.substring(7);
+        console.log('🔑 Token found in Authorization header');
+      }
+    } else {
+      console.log('🍪 Token found in cookies');
     }
+    
+    if (!accessToken) {
+      console.log('❌ No access token found in cookies or headers');
+      return res.status(401).json({ error: 'Not authenticated - no access token' });
+    }
+
+    console.log('✅ Access token found, verifying with Google...');
 
     // Verify token with Google
     oauth2Client.setCredentials({ access_token: accessToken });
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: userInfo } = await oauth2.userinfo.get();
+
+    console.log('✅ User verified:', userInfo.email);
 
     res.json({
       user: {
@@ -87,7 +114,7 @@ router.get('/me', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get user info error:', error);
+    console.error('❌ Get user info error:', error);
     res.status(401).json({ error: 'Invalid token' });
   }
 });
