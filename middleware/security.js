@@ -56,8 +56,11 @@ const securityHeaders = (req, res, next) => {
  * CSRF protection middleware
  */
 const csrfProtection = (req, res, next) => {
-  // Skip CSRF for GET requests and webhook endpoints
-  if (req.method === 'GET' || req.path.includes('/webhook')) {
+  // Skip CSRF for GET requests, webhook endpoints, and OAuth callbacks
+  if (req.method === 'GET' || 
+      req.path.includes('/webhook') || 
+      req.path.includes('/google/callback') ||
+      req.path.includes('/oauth/callback')) {
     return next();
   }
 
@@ -105,10 +108,14 @@ const createRateLimit = (windowMs, max, message) => {
     trustProxy: process.env.NODE_ENV === 'production' ? 1 : false,
     // Use a more specific key generator that works with proxies
     keyGenerator: (req) => {
-      // Use X-Forwarded-For header if available, otherwise use IP
-      const forwarded = req.get('X-Forwarded-For');
-      const ip = forwarded ? forwarded.split(',')[0].trim() : req.ip;
-      return ip;
+      // Only use X-Forwarded-For if trust proxy is enabled
+      if (process.env.NODE_ENV === 'production') {
+        const forwarded = req.get('X-Forwarded-For');
+        const ip = forwarded ? forwarded.split(',')[0].trim() : req.ip;
+        return ip;
+      }
+      // In development, just use the direct IP
+      return req.ip;
     },
     handler: (req, res) => {
       console.warn('Rate limit exceeded:', {
