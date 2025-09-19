@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const stripeRoutes = require('./routes/stripe');
@@ -123,6 +124,9 @@ app.use(cors({
     preflightContinue: false,
     optionsSuccessStatus: 200
   }));
+
+// Cookie parsing middleware
+app.use(cookieParser());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));

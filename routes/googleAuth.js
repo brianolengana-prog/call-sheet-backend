@@ -26,12 +26,26 @@ router.post('/google/callback', async (req, res) => {
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: userInfo } = await oauth2.userinfo.get();
 
-    // Here you can save user to your database if needed
-    // For now, just return the tokens and user info
+    // Set secure HTTP-only cookies for tokens
+    res.cookie('google_access_token', tokens.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 3600000 // 1 hour
+    });
     
+    if (tokens.refresh_token) {
+      res.cookie('google_refresh_token', tokens.refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+      });
+    }
+    
+    // Return only user info (no tokens in response)
     res.json({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
+      success: true,
       user: {
         id: userInfo.id,
         email: userInfo.email,
@@ -47,6 +61,42 @@ router.post('/google/callback', async (req, res) => {
       message: error.message 
     });
   }
+});
+
+// Get current user info from cookies
+router.get('/me', async (req, res) => {
+  try {
+    const accessToken = req.cookies.google_access_token;
+    
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    // Verify token with Google
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const { data: userInfo } = await oauth2.userinfo.get();
+
+    res.json({
+      user: {
+        id: userInfo.id,
+        email: userInfo.email,
+        name: userInfo.name,
+        picture: userInfo.picture
+      }
+    });
+
+  } catch (error) {
+    console.error('Get user info error:', error);
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+// Sign out - clear cookies
+router.post('/signout', (req, res) => {
+  res.clearCookie('google_access_token');
+  res.clearCookie('google_refresh_token');
+  res.json({ success: true });
 });
 
 module.exports = router;
