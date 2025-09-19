@@ -146,6 +146,13 @@ const authRateLimit = createRateLimit(
   'Too many authentication attempts. Please try again later.'
 );
 
+// More lenient rate limit for auth status checks
+const authStatusRateLimit = createRateLimit(
+  60 * 1000, // 1 minute
+  30, // 30 requests per minute
+  'Too many authentication status checks. Please slow down.'
+);
+
 const apiRateLimit = createRateLimit(
   60 * 1000, // 1 minute
   60, // 60 requests
@@ -369,6 +376,7 @@ module.exports = {
   securityHeaders,
   csrfProtection,
   authRateLimit,
+  authStatusRateLimit,
   apiRateLimit,
   stripeRateLimit,
   portalRateLimit,

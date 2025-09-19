@@ -20,6 +20,7 @@ const {
   stripeRateLimit,
   portalRateLimit,
   authRateLimit,
+  authStatusRateLimit,
   validateRequest,
   securityLogger,
   ipFilter,
@@ -147,7 +148,7 @@ app.use(csrfProtection);
 
 // API routes with specific rate limiting
 app.use('/api/auth', authRateLimit, authRoutes);
-app.use('/api/google-auth', authRateLimit, googleAuthRoutes);
+app.use('/api/google-auth', authStatusRateLimit, googleAuthRoutes);
 app.use('/api/clerk', clerkWebhookRoutes); // No rate limiting for webhooks
 app.use('/api/stripe', stripeRateLimit, stripeRoutes);
 app.use('/api/stripe-admin', stripeRateLimit, stripeAdminRoutes);
