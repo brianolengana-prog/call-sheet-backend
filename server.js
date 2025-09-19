@@ -9,12 +9,15 @@ const stripeAdminRoutes = require('./routes/stripe-admin');
 const authRoutes = require('./routes/auth');
 const googleAuthRoutes = require('./routes/googleAuth');
 const clerkWebhookRoutes = require('./routes/clerkWebhooks');
+const chatRoutes = require('./routes/chat');
+const supportRoutes = require('./routes/support');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
   csrfProtection,
   apiRateLimit,
   stripeRateLimit,
+  portalRateLimit,
   authRateLimit,
   validateRequest,
   securityLogger,
@@ -144,6 +147,8 @@ app.use('/api/google-auth', authRateLimit, googleAuthRoutes);
 app.use('/api/clerk', clerkWebhookRoutes); // No rate limiting for webhooks
 app.use('/api/stripe', stripeRateLimit, stripeRoutes);
 app.use('/api/stripe-admin', stripeRateLimit, stripeAdminRoutes);
+app.use('/api/chat', apiRateLimit, chatRoutes);
+app.use('/api/support', apiRateLimit, supportRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

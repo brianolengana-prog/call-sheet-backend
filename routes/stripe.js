@@ -2,6 +2,7 @@ const express = require('express');
 const Stripe = require('stripe');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const { validateStripeWebhook } = require('../middleware/stripeWebhook');
+const { portalRateLimit } = require('../middleware/security');
 const notificationService = require('../services/notificationService');
 
 const router = express.Router();
@@ -102,7 +103,7 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
  * @desc    Create a Stripe customer portal session for subscription management
  * @access  Private
  */
-router.post('/create-portal-session', authenticateToken, async (req, res) => {
+router.post('/create-portal-session', portalRateLimit, authenticateToken, async (req, res) => {
   try {
     const { returnUrl } = req.body;
 
@@ -223,7 +224,7 @@ router.get('/customer', authenticateToken, async (req, res) => {
  */
 router.post('/cancel-subscription', authenticateToken, async (req, res) => {
   try {
-    const { subscriptionId } = req.body;
+    const { subscriptionId, cancelImmediately = false } = req.body;
 
     if (!subscriptionId) {
       return res.status(400).json({
@@ -235,19 +236,43 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       });
     }
 
-    const subscription = await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true
-    });
-
-    res.json({
-      success: true,
-      message: 'Subscription will be canceled at the end of the current period',
-      subscription: {
-        id: subscription.id,
-        status: subscription.status,
-        cancel_at_period_end: subscription.cancel_at_period_end
-      }
-    });
+    let subscription;
+    
+    if (cancelImmediately) {
+      // Cancel immediately
+      subscription = await stripe.subscriptions.cancel(subscriptionId);
+      
+      console.log(`🚨 Subscription ${subscriptionId} cancelled immediately by user ${req.user.email}`);
+      
+      res.json({
+        success: true,
+        message: 'Subscription has been canceled immediately',
+        subscription: {
+          id: subscription.id,
+          status: subscription.status,
+          canceled_at: subscription.canceled_at,
+          cancel_at_period_end: false
+        }
+      });
+    } else {
+      // Cancel at period end (default behavior)
+      subscription = await stripe.subscriptions.update(subscriptionId, {
+        cancel_at_period_end: true
+      });
+      
+      console.log(`⏰ Subscription ${subscriptionId} will be cancelled at period end by user ${req.user.email}`);
+      
+      res.json({
+        success: true,
+        message: 'Subscription will be canceled at the end of the current period',
+        subscription: {
+          id: subscription.id,
+          status: subscription.status,
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          current_period_end: subscription.current_period_end
+        }
+      });
+    }
 
   } catch (error) {
     console.error('Error canceling subscription:', error);
@@ -255,7 +280,8 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       error: {
         message: 'Failed to cancel subscription',
         type: 'server_error',
-        status: 500
+        status: 500,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
       }
     });
   }
@@ -364,6 +390,58 @@ router.get('/billing-history', authenticateToken, async (req, res) => {
 });
 
 /**
+ * @route   GET /api/stripe/payment-methods
+ * @desc    Get customer payment methods
+ * @access  Private
+ */
+router.get('/payment-methods', authenticateToken, async (req, res) => {
+  try {
+    let customerId = req.user.stripeCustomerId;
+
+    if (!customerId) {
+      const customers = await stripe.customers.list({
+        email: req.user.email,
+        limit: 1
+      });
+
+      if (customers.data.length === 0) {
+        return res.json([]);
+      }
+      customerId = customers.data[0].id;
+    }
+
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: 'card'
+    });
+
+    const methods = paymentMethods.data.map(method => ({
+      id: method.id,
+      type: method.type,
+      card: {
+        brand: method.card.brand,
+        last4: method.card.last4,
+        exp_month: method.card.exp_month,
+        exp_year: method.card.exp_year
+      },
+      is_default: false // This would need to be determined from customer's default payment method
+    }));
+
+    res.json(methods);
+
+  } catch (error) {
+    console.error('Error getting payment methods:', error);
+    res.status(500).json({
+      error: {
+        message: 'Failed to get payment methods',
+        type: 'server_error',
+        status: 500
+      }
+    });
+  }
+});
+
+/**
  * @route   GET /api/stripe/health
  * @desc    Health check endpoint for CORS testing
  * @access  Public
@@ -405,20 +483,20 @@ router.get('/plans', async (req, res) => {
         }
       }
       
-      // If no features in metadata, map based on price ID
+      // If no features in metadata, map based on price ID (updated with correct IDs)
       if (features.length === 0) {
-        if (price.id === 'price_1S12zqPbpfQlQm4ifa35bog2') {
+        if (price.id === 'price_1S3fHn6NEzYIXIMoL50vVpQr') {
           // Free plan
           features = ['1 free upload per month', 'Up to 50 contacts', 'Basic role filtering', 'CSV export'];
         } else if (price.id === 'price_1S12xbPbpfQlQm4ijVu9T1DJ') {
           // $199/month plan
           features = ['50 uploads per month', 'Up to 500 contacts', 'Advanced role filtering', 'Priority processing', 'Email support', 'CSV export'];
-        } else if (price.id === 'price_1S12w4PbpfQlQm4iAJOHdUEy') {
+        } else if (price.id === 'price_1S3fJQ6NEzYIXIMorYYqfFpW') {
           // $79.99/month plan
           features = ['200 uploads per month', 'Unlimited contacts', 'Advanced role filtering', 'Priority processing', 'Priority support', 'Advanced analytics', 'CSV export'];
-        } else if (price.id === 'price_1S12qRPbpfQlQm4iwqRdSTbt') {
+        } else if (price.id === 'price_1S3fG16NEzYIXIModekCNdYT') {
           // $29.99/month plan
-          features = ['25 uploads per month', 'Up to 250 contacts', 'Basic role filtering', 'Standard processing', 'Email support', 'CSV export'];
+          features = ['50 uploads per month', 'Up to 500 contacts', 'Advanced role filtering', 'Priority processing', 'Email support', 'CSV export'];
         } else {
           // Default features for unknown plans
           features = ['Standard features', 'CSV export'];
@@ -442,6 +520,66 @@ router.get('/plans', async (req, res) => {
     res.status(500).json({
       error: {
         message: 'Failed to get available plans',
+        type: 'server_error',
+        status: 500
+      }
+    });
+  }
+});
+
+/**
+ * @route   POST /api/stripe/activate-free-plan
+ * @desc    Activate free plan for user (no payment required)
+ * @access  Private
+ */
+router.post('/activate-free-plan', authenticateToken, async (req, res) => {
+  try {
+    const { planId } = req.body;
+
+    if (!planId || planId !== 'free') {
+      return res.status(400).json({
+        error: {
+          message: 'Invalid plan ID for free plan activation',
+          type: 'validation_error',
+          status: 400
+        }
+      });
+    }
+
+    console.log('🆓 Free plan activation request:', {
+      userId: req.user.id,
+      email: req.user.email,
+      planId: planId,
+      timestamp: new Date().toISOString()
+    });
+
+    // Here you would typically update the user's plan in your database
+    // For now, we'll just return success since free plans don't require Stripe integration
+    
+    // TODO: Update user's plan in your database
+    // Example: await updateUserPlanInDatabase(req.user.id, 'free');
+
+    res.json({
+      success: true,
+      message: 'Free plan activated successfully',
+      plan: {
+        id: 'free',
+        name: 'Free Plan',
+        price: 0,
+        features: [
+          '1 upload per month',
+          'Up to 50 contacts',
+          'Basic contact extraction',
+          'Email support'
+        ]
+      }
+    });
+
+  } catch (error) {
+    console.error('Error activating free plan:', error);
+    res.status(500).json({
+      error: {
+        message: 'Failed to activate free plan',
         type: 'server_error',
         status: 500
       }
@@ -1195,10 +1333,10 @@ async function handleInvoiceUpcoming(invoice) {
 function getPlanTypeFromPriceId(priceId) {
   if (!priceId) return 'free';
   
-  // Map your actual Stripe price IDs to plan types
-  if (priceId === 'price_1S12zqPbpfQlQm4ifa35bog2') return 'free';
-  if (priceId === 'price_1S12qRPbpfQlQm4iwqRdSTbt') return 'starter';
-  if (priceId === 'price_1S12w4PbpfQlQm4iAJOHdUEy') return 'professional';
+  // Map your actual Stripe price IDs to plan types (updated with correct IDs)
+  if (priceId === 'price_1S3fHn6NEzYIXIMoL50vVpQr') return 'free';
+  if (priceId === 'price_1S3fG16NEzYIXIModekCNdYT') return 'starter';
+  if (priceId === 'price_1S3fJQ6NEzYIXIMorYYqfFpW') return 'professional';
   if (priceId === 'price_1S12xbPbpfQlQm4ijVu9T1DJ') return 'enterprise';
   
   return 'unknown';

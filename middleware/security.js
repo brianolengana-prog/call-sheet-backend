@@ -146,8 +146,14 @@ const apiRateLimit = createRateLimit(
 
 const stripeRateLimit = createRateLimit(
   60 * 1000, // 1 minute
-  10, // 10 requests
+  30, // 30 requests per minute (more reasonable for billing operations)
   'Too many payment requests. Please try again later.'
+);
+
+const portalRateLimit = createRateLimit(
+  60 * 1000, // 1 minute
+  5, // 5 portal sessions per minute (more restrictive for security)
+  'Too many portal session requests. Please wait before trying again.'
 );
 
 /**
@@ -357,6 +363,7 @@ module.exports = {
   authRateLimit,
   apiRateLimit,
   stripeRateLimit,
+  portalRateLimit,
   validateRequest,
   securityLogger,
   ipFilter,

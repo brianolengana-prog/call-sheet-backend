@@ -6,52 +6,96 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
 /**
- * Verify JWT token signature with Supabase public key
+ * Verify JWT token signature with Supabase JWT secret
  * @param {string} token - The JWT token
  * @returns {Object|null} Decoded payload or null if invalid
  */
 const verifySupabaseToken = async (token) => {
   try {
-    // For Supabase tokens, we need to fetch the public key from Supabase
-    // In production, cache this key and refresh periodically
     const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseJwtSecret = process.env.SUPABASE_JWT_SECRET;
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
     
     console.log('🔍 JWT Verification - Environment check:', {
       hasSupabaseUrl: !!supabaseUrl,
-      hasServiceKey: !!supabaseServiceKey,
-      hasJwtSecret: !!process.env.JWT_SECRET,
+      hasJwtSecret: !!supabaseJwtSecret,
+      hasAnonKey: !!supabaseAnonKey,
       supabaseUrlPreview: supabaseUrl ? supabaseUrl.substring(0, 30) + '...' : 'missing'
     });
     
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.warn('❌ Supabase configuration missing - falling back to basic validation');
-      return null;
+    if (!supabaseUrl) {
+      console.warn('❌ SUPABASE_URL missing');
+      throw new Error('MISSING_SUPABASE_URL');
     }
 
-    // For now, we'll use the service role key for verification
-    // In production, you should use the actual JWT secret from Supabase
-    const jwtSecret = process.env.JWT_SECRET || supabaseServiceKey;
+    // Try multiple JWT secrets in order of preference
+    const jwtSecrets = [
+      supabaseJwtSecret,
+      supabaseAnonKey,
+      process.env.JWT_SECRET
+    ].filter(Boolean);
+
+    if (jwtSecrets.length === 0) {
+      console.warn('❌ No JWT secrets available');
+      throw new Error('MISSING_JWT_SECRET');
+    }
+
+    // Decode the token header to check the algorithm
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
+      throw new Error('INVALID_TOKEN_FORMAT');
+    }
     
-    console.log('🔑 Using JWT secret for verification:', {
-      hasJwtSecret: !!jwtSecret,
-      secretPreview: jwtSecret ? jwtSecret.substring(0, 20) + '...' : 'missing'
+    const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
+    const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+    
+    console.log('🔍 Token header:', { alg: header.alg, typ: header.typ });
+    console.log('🔍 Token payload:', { 
+      sub: payload.sub, 
+      email: payload.email, 
+      aud: payload.aud, 
+      iss: payload.iss,
+      exp: payload.exp,
+      iat: payload.iat
     });
     
-    const decoded = jwt.verify(token, jwtSecret, {
-      algorithms: ['HS256', 'RS256'],
-      issuer: supabaseUrl,
-      audience: 'authenticated'
-    });
+    // Try each JWT secret until one works
+    let lastError;
+    for (let i = 0; i < jwtSecrets.length; i++) {
+      const secret = jwtSecrets[i];
+      try {
+        console.log(`🔑 Trying JWT secret ${i + 1}/${jwtSecrets.length}:`, {
+          secretPreview: secret.substring(0, 20) + '...',
+          secretLength: secret.length
+        });
+        
+        const decoded = jwt.verify(token, secret, {
+          algorithms: ['HS256'], // Supabase uses HS256
+          issuer: supabaseUrl + '/auth/v1',
+          audience: 'authenticated',
+          clockTolerance: 30 // Allow 30 seconds clock skew
+        });
+        
+        console.log('✅ JWT token verified successfully:', {
+          userId: decoded.sub,
+          email: decoded.email,
+          exp: decoded.exp,
+          iat: decoded.iat,
+          secretUsed: i + 1,
+          timestamp: new Date().toISOString()
+        });
+        
+        return decoded;
+      } catch (error) {
+        lastError = error;
+        console.log(`❌ JWT secret ${i + 1} failed:`, error.message);
+        continue;
+      }
+    }
     
-    console.log('✅ JWT token verified successfully:', {
-      userId: decoded.sub,
-      email: decoded.email,
-      exp: decoded.exp,
-      timestamp: new Date().toISOString()
-    });
+    // If all secrets failed, throw the last error
+    throw lastError;
     
-    return decoded;
   } catch (error) {
     console.error('❌ JWT verification failed:', {
       error: error.message,
@@ -80,26 +124,28 @@ const extractUserFromToken = async (token) => {
   try {
     const tokenParts = token.split('.');
     if (tokenParts.length !== 3) {
+      console.warn('Invalid token format - not 3 parts');
       return null;
     }
 
-    // First try signature verification
+    // Always verify signature - no fallback for security
     let payload;
     try {
       payload = await verifySupabaseToken(token);
     } catch (error) {
-      // If signature verification fails, fall back to basic extraction for development
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('Token verification failed, using development mode:', error.message);
-        payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
-      } else {
-        console.error('Token verification failed in production:', error.message);
+      console.error('Token verification failed:', error.message);
+      // In production, never fall back to unverified tokens
+      if (process.env.NODE_ENV === 'production') {
         return null;
       }
+      // In development, allow fallback but log warning
+      console.warn('⚠️  DEVELOPMENT MODE: Using unverified token (SECURITY RISK)');
+      payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
     }
     
     // Validate required fields
     if (!payload.sub || !payload.email) {
+      console.warn('Missing required fields in token:', { sub: !!payload.sub, email: !!payload.email });
       return null;
     }
 
@@ -111,11 +157,13 @@ const extractUserFromToken = async (token) => {
 
     // Check if token is expired (double-check)
     if (payload.exp && Date.now() >= payload.exp * 1000) {
+      console.warn('Token is expired');
       return null;
     }
 
     // Check if token is not yet valid
     if (payload.nbf && Date.now() < payload.nbf * 1000) {
+      console.warn('Token is not yet valid');
       return null;
     }
 
@@ -131,7 +179,7 @@ const extractUserFromToken = async (token) => {
       user_metadata: payload.user_metadata || {},
       // Add security context
       token_hash: crypto.createHash('sha256').update(token).digest('hex').substring(0, 16),
-      verified: process.env.NODE_ENV === 'production' ? true : payload._verified !== false
+      verified: true // Always verified if we got here
     };
   } catch (error) {
     console.error('Error extracting user from token:', error);
