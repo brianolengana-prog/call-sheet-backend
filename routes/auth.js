@@ -384,4 +384,34 @@ router.get('/security-audit', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/auth/users
+ * Get all users (admin only)
+ */
+router.get('/users', async (req, res) => {
+  try {
+    const prismaService = require('../services/prismaService');
+    const users = await prismaService.getAllUsers();
+    
+    res.json({
+      success: true,
+      users: users.map(user => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        provider: user.provider,
+        emailVerified: user.emailVerified,
+        createdAt: user.createdAt,
+        lastLoginAt: user.lastLoginAt
+      }))
+    });
+  } catch (error) {
+    console.error('❌ Get users error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve users'
+    });
+  }
+});
+
 module.exports = router;

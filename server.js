@@ -5,6 +5,9 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
+// Initialize Prisma
+const prismaService = require('./services/prismaService');
+
 const stripeRoutes = require('./routes/stripe');
 const stripeAdminRoutes = require('./routes/stripe-admin');
 const authRoutes = require('./routes/auth');
@@ -170,6 +173,10 @@ app.use(errorHandler);
 // Startup routine
 const initializeServer = async () => {
   try {
+    // Initialize Prisma database connection
+    console.log('🔌 Connecting to database...');
+    await prismaService.connect();
+    
     // Cleanup old logs on startup
     await authLogger.cleanupOldLogs(90); // Keep logs for 90 days
     
@@ -206,13 +213,15 @@ const initializeServer = async () => {
 initializeServer();
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
+  await prismaService.disconnect();
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
+  await prismaService.disconnect();
   process.exit(0);
 });
 

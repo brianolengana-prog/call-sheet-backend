@@ -1,0 +1,280 @@
+// Prisma schema for Call Sheet Management System Backend
+// Connected to Supabase PostgreSQL database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")      // Pooled connection for queries
+  directUrl = env("DIRECT_URL")        // Direct connection for migrations
+}
+
+// ========================================
+// AUTHENTICATION & USER MANAGEMENT
+// ========================================
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String
+  passwordHash      String?   @map("password_hash")
+  provider          String    @default("email")
+  providerId        String?   @map("provider_id")
+  emailVerified     Boolean   @default(false) @map("email_verified")
+  twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorSecret   String?   @map("two_factor_secret")
+  loginAttempts     Int       @default(0) @map("login_attempts")
+  lockedUntil       DateTime? @map("locked_until")
+  lastLoginAt       DateTime? @map("last_login_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  twoFactorCodes    TwoFactorCode[]
+  securityAuditLogs SecurityAuditLog[]
+  sessions          Session[]
+  usage             Usage[]
+
+  @@map("users")
+}
+
+// ========================================
+// EXISTING CORE TABLES (from your schema)
+// ========================================
+
+model Profile {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @unique @map("user_id") @db.Uuid
+  displayName String?  @map("display_name")
+  avatarUrl   String?  @map("avatar_url")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations to existing tables
+  callSheets  CallSheet[]
+  jobs        Job[]
+  productions Production[]
+  contacts    Contact[]
+
+  @@map("profiles")
+}
+
+model Production {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String
+  description String?
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  profile     Profile     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  callSheets  CallSheet[]
+  jobs        Job[]
+
+  @@map("productions")
+}
+
+model CallSheet {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  productionId String   @map("production_id") @db.Uuid
+  title        String
+  shootDate    String   @map("shoot_date")
+  location     String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  profile    Profile    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  production Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+
+  @@map("call_sheets")
+}
+
+model Job {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  title            String
+  fileName         String?  @map("file_name")
+  fileUrl          String?  @map("file_url")
+  status           JobStatus @default(PROCESSING)
+  processedContacts Json?   @map("processed_contacts") @db.JsonB
+  productionId     String?  @map("production_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  profile    Profile     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  production Production? @relation(fields: [productionId], references: [id], onDelete: SetNull)
+  contacts   Contact[]
+
+  @@map("jobs")
+}
+
+model Contact {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId     String   @map("job_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  email     String?
+  phone     String?
+  role      String?
+  company   String?
+  isSelected Boolean @default(true) @map("is_selected")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("contacts")
+}
+
+// ========================================
+// EXISTING BILLING TABLES
+// ========================================
+
+model Subscription {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String            @map("user_id") @db.Uuid
+  stripeCustomerId  String            @map("stripe_customer_id")
+  stripeSubscriptionId String?        @unique @map("stripe_subscription_id")
+  status            String
+  priceId           String            @map("price_id")
+  currentPeriodStart DateTime         @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd   DateTime         @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd  Boolean          @default(false) @map("cancel_at_period_end")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stripePaymentIntentId String?  @map("stripe_payment_intent_id")
+  stripeInvoiceId       String?  @map("stripe_invoice_id")
+  amount                Int
+  currency              String   @default("usd")
+  status                String
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("payments")
+}
+
+// ========================================
+// AUTHENTICATION TOKENS
+// ========================================
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_tokens")
+}
+
+model TwoFactorCode {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  code      String
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("two_factor_codes")
+}
+
+model SecurityAuditLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  action    String
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  success   Boolean
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("security_audit_log")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  accessToken  String   @unique @map("access_token")
+  refreshToken String   @unique @map("refresh_token")
+  expiresAt    DateTime @map("expires_at")
+  isActive     Boolean  @default(true) @map("is_active")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Usage {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  month         String   // YYYY-MM format
+  jobsProcessed Int      @default(0) @map("jobs_processed")
+  contactsExtracted Int  @default(0) @map("contacts_extracted")
+  apiCalls      Int      @default(0) @map("api_calls")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, month])
+  @@map("usage")
+}
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum JobStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@map("job_status")
+}

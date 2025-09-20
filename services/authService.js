@@ -8,6 +8,7 @@ const { google } = require('googleapis');
 const crypto = require('crypto');
 const emailService = require('./emailService');
 const securityService = require('./securityService');
+const prismaService = require('./prismaService');
 
 class AuthService {
   constructor() {
@@ -15,11 +16,11 @@ class AuthService {
     this.jwtExpiry = process.env.JWT_EXPIRY || '24h';
     this.refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRY || '7d';
     
-    // In-memory storage for demo (use database in production)
-    this.users = new Map();
-    this.passwordResetTokens = new Map();
-    this.emailVerificationTokens = new Map();
-    this.twoFactorCodes = new Map();
+    // Database storage - all data persisted in Supabase
+    // No in-memory storage needed
+    
+    // Initialize with demo user for development
+    this.initializeDemoUser();
     
     // Google OAuth configuration
     this.oauth2Client = new google.auth.OAuth2(
@@ -30,10 +31,48 @@ class AuthService {
   }
 
   /**
+   * Initialize demo user for development
+   */
+  async initializeDemoUser() {
+    if (process.env.NODE_ENV !== 'production') {
+      const demoEmail = 'demo@example.com';
+      const demoPassword = 'demo123';
+      
+      try {
+        // Check if demo user already exists
+        const existingUser = await prismaService.getUserByEmail(demoEmail);
+        
+        if (!existingUser) {
+          const hashedPassword = await securityService.hashPassword(demoPassword);
+          
+          const demoUser = {
+            name: 'Demo User',
+            email: demoEmail,
+            passwordHash: hashedPassword,
+            provider: 'email',
+            emailVerified: true,
+            twoFactorEnabled: false
+          };
+          
+          const createdUser = await prismaService.createUser(demoUser);
+          console.log('🔧 Demo user created:', demoEmail, 'ID:', createdUser.id);
+        } else {
+          console.log('🔧 Demo user already exists:', demoEmail);
+        }
+      } catch (error) {
+        console.error('Error initializing demo user:', error);
+      }
+    }
+  }
+
+  /**
    * Generate JWT token
    */
   generateToken(payload) {
-    return jwt.sign(payload, this.jwtSecret, { 
+    // Remove exp from payload if it exists to avoid conflict with expiresIn
+    const { exp, ...cleanPayload } = payload;
+    
+    return jwt.sign(cleanPayload, this.jwtSecret, { 
       expiresIn: this.jwtExpiry,
       issuer: 'call-sheet-backend',
       audience: 'call-sheet-frontend'
@@ -140,15 +179,56 @@ class AuthService {
         throw new Error('No email found in Google user info');
       }
 
-      // Create user object
-      const user = this.createUserFromGoogle(userInfo);
+      // Check if user exists in database
+      let user = await prismaService.getUserByProvider('google', userInfo.id);
+      
+      if (!user) {
+        // Create new user in database
+        const userData = {
+          name: userInfo.name,
+          email: userInfo.email,
+          provider: 'google',
+          providerId: userInfo.id,
+          emailVerified: userInfo.verified_email || false,
+          twoFactorEnabled: false
+        };
+        
+        user = await prismaService.createUser(userData);
+        
+        // Log user registration
+        await prismaService.logSecurityEvent({
+          userId: user.id,
+          action: 'user_registered',
+          success: true,
+          details: { email: user.email, provider: 'google' }
+        });
+      } else {
+        // Update last login
+        await prismaService.updateUser(user.id, { lastLoginAt: new Date() });
+      }
       
       // Create session
       const session = this.createSession(user);
 
+      // Log successful login
+      await prismaService.logSecurityEvent({
+        userId: user.id,
+        action: 'login_success',
+        success: true,
+        details: { email: user.email, provider: 'google' }
+      });
+
       return {
         success: true,
-        user,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          emailVerified: user.emailVerified,
+          provider: user.provider,
+          twoFactorEnabled: user.twoFactorEnabled,
+          createdAt: user.createdAt
+        },
         session
       };
     } catch (error) {
@@ -236,44 +316,49 @@ class AuthService {
       }
 
       // Check if user already exists
-      if (this.users.has(email)) {
+      const existingUser = await prismaService.getUserByEmail(email);
+      console.log('🔍 Checking for existing user:', email);
+      console.log('🔍 Existing user result:', existingUser);
+      if (existingUser) {
+        console.log('❌ User already exists:', existingUser.email);
         return { success: false, error: 'User already exists' };
       }
+      console.log('✅ User does not exist, proceeding with registration');
 
       // Hash password
       const hashedPassword = await securityService.hashPassword(password);
       
+      // Create user in database
+      const newUserData = {
+        name,
+        email,
+        passwordHash: hashedPassword,
+        provider: 'email',
+        emailVerified: false,
+        twoFactorEnabled: false
+      };
+
+      const user = await prismaService.createUser(newUserData);
+      
       // Generate verification token
       const verificationToken = securityService.generateEmailVerificationToken();
       
-      // Create user
-      const user = {
-        id: crypto.randomUUID(),
-        name,
-        email,
-        password: hashedPassword,
-        emailVerified: false,
-        provider: 'email',
-        twoFactorEnabled: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        lastLoginAt: null,
-        loginAttempts: 0,
-        lockedUntil: null
-      };
-
-      this.users.set(email, user);
-      this.emailVerificationTokens.set(verificationToken.token, {
-        email,
-        expiresAt: verificationToken.expiresAt
-      });
+      // Store verification token in database
+      await prismaService.createEmailVerificationToken(
+        user.id,
+        verificationToken.token,
+        verificationToken.expiresAt
+      );
 
       // Send verification email
       await emailService.sendVerificationEmail(email, verificationToken.token, name);
 
-      securityService.logSecurityEvent('USER_REGISTERED', email, {
-        name,
-        provider: 'email'
+      // Log security event
+      await prismaService.logSecurityEvent({
+        userId: user.id,
+        action: 'user_registered',
+        success: true,
+        details: { email, name, provider: 'email' }
       });
 
       return {
@@ -309,10 +394,19 @@ class AuthService {
         };
       }
 
-      // Get user
-      const user = this.users.get(email);
+      // Get user from database
+      const user = await prismaService.getUserByEmail(email);
+      console.log('🔍 User lookup for email:', email);
+      console.log('🔍 User found:', !!user);
+      
       if (!user) {
-        securityService.recordFailedAttempt(email, ip, userAgent);
+        await prismaService.logSecurityEvent({
+          action: 'failed_login',
+          success: false,
+          details: { email, reason: 'user_not_found' },
+          ipAddress: ip,
+          userAgent: userAgent
+        });
         return {
           success: false,
           error: 'Invalid email or password'
@@ -320,17 +414,24 @@ class AuthService {
       }
 
       // Verify password
-      const isValidPassword = await securityService.verifyPassword(password, user.password);
+      const isValidPassword = await securityService.verifyPassword(password, user.passwordHash);
       if (!isValidPassword) {
-        securityService.recordFailedAttempt(email, ip, userAgent);
+        await prismaService.logSecurityEvent({
+          userId: user.id,
+          action: 'failed_login',
+          success: false,
+          details: { email, reason: 'invalid_password' },
+          ipAddress: ip,
+          userAgent: userAgent
+        });
         return {
           success: false,
           error: 'Invalid email or password'
         };
       }
 
-      // Check if email is verified
-      if (!user.emailVerified) {
+      // Check if email is verified (skip in development)
+      if (!user.emailVerified && process.env.NODE_ENV === 'production') {
         return {
           success: false,
           error: 'Please verify your email address before logging in',
@@ -338,22 +439,27 @@ class AuthService {
         };
       }
 
-      // Clear failed attempts
-      securityService.clearFailedAttempts(email);
+      // Auto-verify email in development mode
+      if (!user.emailVerified && process.env.NODE_ENV !== 'production') {
+        await prismaService.updateUser(user.id, { emailVerified: true });
+        user.emailVerified = true;
+        console.log('🔓 Development mode: Auto-verified email for', email);
+      }
 
-      // Update user
-      user.lastLoginAt = new Date().toISOString();
-      user.loginAttempts = 0;
-      user.lockedUntil = null;
-      this.users.set(email, user);
+      // Update last login
+      await prismaService.updateUser(user.id, { lastLoginAt: new Date() });
 
       // Create session
       const session = this.createSession(user);
 
-      securityService.logSecurityEvent('LOGIN_SUCCESS', email, {
-        provider: 'email',
-        ip,
-        userAgent
+      // Log successful login
+      await prismaService.logSecurityEvent({
+        userId: user.id,
+        action: 'login_success',
+        success: true,
+        details: { email, provider: 'email' },
+        ipAddress: ip,
+        userAgent: userAgent
       });
 
       return {

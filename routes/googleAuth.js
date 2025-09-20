@@ -7,6 +7,45 @@ const express = require('express');
 const authService = require('../services/authService');
 const router = express.Router();
 
+/**
+ * GET /api/google-auth/url
+ * Get Google OAuth authorization URL
+ */
+router.get('/url', (req, res) => {
+  try {
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const redirectUri = process.env.NODE_ENV === 'production' 
+      ? 'https://www.callsheetconvert.com/auth/callback'
+      : `${process.env.FRONTEND_URL || 'http://localhost:5173'}/auth/callback`;
+    
+    if (!clientId) {
+      return res.status(500).json({
+        success: false,
+        error: 'Google OAuth client ID not configured'
+      });
+    }
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${clientId}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `response_type=code&` +
+      `scope=email profile&` +
+      `access_type=offline&` +
+      `prompt=consent`;
+
+    res.json({
+      success: true,
+      authUrl
+    });
+  } catch (error) {
+    console.error('❌ Google OAuth URL generation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate Google OAuth URL'
+    });
+  }
+});
+
 // Handle Google OAuth callback
 router.post('/google/callback', async (req, res) => {
   try {

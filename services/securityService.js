@@ -9,7 +9,7 @@ const bcrypt = require('bcrypt');
 class SecurityService {
   constructor() {
     this.failedAttempts = new Map(); // In production, use Redis
-    this.lockedAccounts = new Set(); // In production, use Redis
+    this.lockedAccounts = new Map(); // In production, use Redis
     this.auditLog = []; // In production, use database
     this.maxFailedAttempts = 5;
     this.lockoutDuration = 15 * 60 * 1000; // 15 minutes
@@ -261,7 +261,7 @@ class SecurityService {
   generatePasswordResetToken() {
     return {
       token: this.generateSecureToken(32),
-      expiresAt: Date.now() + (60 * 60 * 1000) // 1 hour
+      expiresAt: new Date(Date.now() + (60 * 60 * 1000)) // 1 hour
     };
   }
 
@@ -271,7 +271,7 @@ class SecurityService {
   generateEmailVerificationToken() {
     return {
       token: this.generateSecureToken(32),
-      expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+      expiresAt: new Date(Date.now() + (24 * 60 * 60 * 1000)) // 24 hours
     };
   }
 }
