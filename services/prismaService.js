@@ -60,31 +60,71 @@ class PrismaService {
    * Create user
    */
   async createUser(userData) {
-    // Ensure we don't pass an invalid id - let Prisma generate it
-    const { id, ...userDataWithoutId } = userData;
-    
-    // Debug logging
-    console.log('🔍 Creating user with data:', JSON.stringify(userDataWithoutId, null, 2));
-    
-    // Validate that no UUID fields are being passed incorrectly
-    const allowedFields = [
-      'email', 'name', 'passwordHash', 'provider', 'providerId', 
-      'emailVerified', 'twoFactorEnabled', 'twoFactorSecret',
-      'loginAttempts', 'lockedUntil', 'lastLoginAt'
-    ];
-    
-    const filteredData = {};
-    for (const [key, value] of Object.entries(userDataWithoutId)) {
-      if (allowedFields.includes(key)) {
-        filteredData[key] = value;
-      } else {
-        console.warn(`⚠️ Unexpected field in userData: ${key} = ${value}`);
+    try {
+      // Ensure we don't pass an invalid id - let Prisma generate it
+      const { id, ...userDataWithoutId } = userData;
+      
+      // Debug logging
+      console.log('🔍 Creating user with data:', JSON.stringify(userDataWithoutId, null, 2));
+      
+      // Validate that no UUID fields are being passed incorrectly
+      const allowedFields = [
+        'email', 'name', 'passwordHash', 'provider', 'providerId', 
+        'emailVerified', 'twoFactorEnabled', 'twoFactorSecret',
+        'loginAttempts', 'lockedUntil', 'lastLoginAt'
+      ];
+      
+      const filteredData = {};
+      for (const [key, value] of Object.entries(userDataWithoutId)) {
+        if (allowedFields.includes(key)) {
+          // Additional validation for specific fields
+          if (key === 'email' && typeof value === 'string') {
+            filteredData[key] = value;
+          } else if (key === 'name' && typeof value === 'string') {
+            filteredData[key] = value;
+          } else if (key === 'provider' && typeof value === 'string') {
+            filteredData[key] = value;
+          } else if (key === 'providerId' && typeof value === 'string') {
+            filteredData[key] = value;
+          } else if (key === 'emailVerified' && typeof value === 'boolean') {
+            filteredData[key] = value;
+          } else if (key === 'twoFactorEnabled' && typeof value === 'boolean') {
+            filteredData[key] = value;
+          } else if (key === 'passwordHash' && (typeof value === 'string' || value === null)) {
+            filteredData[key] = value;
+          } else if (key === 'twoFactorSecret' && (typeof value === 'string' || value === null)) {
+            filteredData[key] = value;
+          } else if (key === 'loginAttempts' && typeof value === 'number') {
+            filteredData[key] = value;
+          } else if (key === 'lockedUntil' && (value instanceof Date || value === null)) {
+            filteredData[key] = value;
+          } else if (key === 'lastLoginAt' && (value instanceof Date || value === null)) {
+            filteredData[key] = value;
+          } else {
+            console.warn(`⚠️ Invalid field type for ${key}:`, typeof value, value);
+          }
+        } else {
+          console.warn(`⚠️ Unexpected field in userData: ${key} = ${value}`);
+        }
       }
+      
+      // Generate UUID in JavaScript to avoid database issues
+      const crypto = require('crypto');
+      const userId = crypto.randomUUID();
+      
+      console.log('🔍 Generated UUID for user:', userId);
+      
+      return await this.prisma.user.create({
+        data: {
+          ...filteredData,
+          id: userId
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error in createUser:', error);
+      console.error('❌ userData that caused error:', JSON.stringify(userData, null, 2));
+      throw error;
     }
-    
-    return await this.prisma.user.create({
-      data: filteredData
-    });
   }
 
   /**
