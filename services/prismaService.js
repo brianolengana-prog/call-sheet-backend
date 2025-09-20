@@ -60,8 +60,11 @@ class PrismaService {
    * Create user
    */
   async createUser(userData) {
+    // Ensure we don't pass an invalid id - let Prisma generate it
+    const { id, ...userDataWithoutId } = userData;
+    
     return await this.prisma.user.create({
-      data: userData
+      data: userDataWithoutId
     });
   }
 
