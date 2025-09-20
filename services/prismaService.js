@@ -63,8 +63,27 @@ class PrismaService {
     // Ensure we don't pass an invalid id - let Prisma generate it
     const { id, ...userDataWithoutId } = userData;
     
+    // Debug logging
+    console.log('🔍 Creating user with data:', JSON.stringify(userDataWithoutId, null, 2));
+    
+    // Validate that no UUID fields are being passed incorrectly
+    const allowedFields = [
+      'email', 'name', 'passwordHash', 'provider', 'providerId', 
+      'emailVerified', 'twoFactorEnabled', 'twoFactorSecret',
+      'loginAttempts', 'lockedUntil', 'lastLoginAt'
+    ];
+    
+    const filteredData = {};
+    for (const [key, value] of Object.entries(userDataWithoutId)) {
+      if (allowedFields.includes(key)) {
+        filteredData[key] = value;
+      } else {
+        console.warn(`⚠️ Unexpected field in userData: ${key} = ${value}`);
+      }
+    }
+    
     return await this.prisma.user.create({
-      data: userDataWithoutId
+      data: filteredData
     });
   }
 
