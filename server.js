@@ -15,6 +15,7 @@ const googleAuthRoutes = require('./routes/googleAuth');
 const clerkWebhookRoutes = require('./routes/clerkWebhooks');
 const chatRoutes = require('./routes/chat');
 const supportRoutes = require('./routes/support');
+const subscriptionRoutes = require('./routes/subscription');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
@@ -155,6 +156,7 @@ app.use('/api/google-auth', authStatusRateLimit, googleAuthRoutes);
 app.use('/api/clerk', clerkWebhookRoutes); // No rate limiting for webhooks
 app.use('/api/stripe', stripeRateLimit, stripeRoutes);
 app.use('/api/stripe-admin', stripeRateLimit, stripeAdminRoutes);
+app.use('/api/subscription', apiRateLimit, subscriptionRoutes);
 app.use('/api/chat', apiRateLimit, chatRoutes);
 app.use('/api/support', apiRateLimit, supportRoutes);
 

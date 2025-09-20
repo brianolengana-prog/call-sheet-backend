@@ -5,6 +5,7 @@
 
 const express = require('express');
 const authService = require('../services/authService');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 /**
@@ -109,46 +110,24 @@ router.post('/register', async (req, res) => {
  * GET /api/auth/me
  * Get current user information
  */
-router.get('/me', async (req, res) => {
+router.get('/me', authenticateToken, async (req, res) => {
   try {
-    console.log('🔍 Auth check request received');
+    console.log('🔍 Auth check request received for user:', req.user.id);
     
-    // Get token from Authorization header or cookies
-    let token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
-      token = req.cookies.auth_access_token;
-    }
-
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No authentication token provided'
-      });
-    }
-
-    // Verify token
-    const result = await authService.verifyAccessToken(token);
-    
-    if (!result.success) {
-      return res.status(401).json({
-        success: false,
-        error: result.error
-      });
-    }
-
     // Create session object for response
     const session = {
-      user: result.user,
-      accessToken: token,
+      user: req.user,
+      accessToken: req.headers.authorization?.replace('Bearer ', '') || req.cookies.auth_access_token,
+      refreshToken: req.cookies.auth_refresh_token,
       expiresAt: Date.now() + (24 * 60 * 60 * 1000), // 24 hours
       isActive: true
     };
 
-    console.log('✅ User authenticated:', result.user.email);
+    console.log('✅ User authenticated:', req.user.email);
     
     res.json({
       success: true,
-      user: result.user,
+      user: req.user,
       session
     });
   } catch (error) {

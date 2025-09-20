@@ -529,6 +529,225 @@ class PrismaService {
       activeSessions
     };
   }
+
+  // ========================================
+  // SUBSCRIPTION METHODS
+  // ========================================
+
+  /**
+   * Get all plans
+   */
+  async getPlans() {
+    try {
+      return await this.prisma.plan.findMany({
+        where: { isActive: true },
+        orderBy: { price: 'asc' }
+      });
+    } catch (error) {
+      console.error('❌ Error getting plans:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get plan by ID
+   */
+  async getPlanById(planId) {
+    try {
+      return await this.prisma.plan.findUnique({
+        where: { id: planId }
+      });
+    } catch (error) {
+      console.error('❌ Error getting plan by ID:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new plan
+   */
+  async createPlan(planData) {
+    try {
+      return await this.prisma.plan.create({
+        data: planData
+      });
+    } catch (error) {
+      console.error('❌ Error creating plan:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's subscription
+   */
+  async getUserSubscription(userId) {
+    try {
+      return await this.prisma.subscription.findFirst({
+        where: { userId },
+        include: { user: true }
+      });
+    } catch (error) {
+      console.error('❌ Error getting user subscription:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new subscription
+   */
+  async createSubscription(subscriptionData) {
+    try {
+      return await this.prisma.subscription.create({
+        data: subscriptionData,
+        include: { user: true }
+      });
+    } catch (error) {
+      console.error('❌ Error creating subscription:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update subscription
+   */
+  async updateSubscription(subscriptionId, updateData) {
+    try {
+      return await this.prisma.subscription.update({
+        where: { id: subscriptionId },
+        data: updateData,
+        include: { user: true }
+      });
+    } catch (error) {
+      console.error('❌ Error updating subscription:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's current usage
+   */
+  async getUserUsage(userId) {
+    try {
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      
+      let usage = await this.prisma.usage.findUnique({
+        where: {
+          userId_month: {
+            userId,
+            month
+          }
+        }
+      });
+
+      // If no usage record exists, create one
+      if (!usage) {
+        const subscription = await this.getUserSubscription(userId);
+        const plan = subscription ? await this.getPlanById(subscription.planId) : null;
+        
+        usage = await this.prisma.usage.create({
+          data: {
+            userId,
+            subscriptionId: subscription?.id,
+            month,
+            uploadsLimit: plan?.uploadsPerMonth || 1,
+            storageLimitGB: plan?.storageGB || 1,
+            aiMinutesLimit: plan?.aiProcessingMinutes || 60,
+            apiCallsLimit: plan?.apiCallsPerMonth || 100
+          }
+        });
+      }
+
+      return usage;
+    } catch (error) {
+      console.error('❌ Error getting user usage:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update user usage
+   */
+  async updateUserUsage(userId, usageData) {
+    try {
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      
+      return await this.prisma.usage.upsert({
+        where: {
+          userId_month: {
+            userId,
+            month
+          }
+        },
+        update: usageData,
+        create: {
+          userId,
+          month,
+          ...usageData
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error updating user usage:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Increment usage counter
+   */
+  async incrementUsage(userId, field, amount = 1) {
+    try {
+      const usage = await this.getUserUsage(userId);
+      
+      const updateData = {};
+      updateData[field] = usage[field] + amount;
+      
+      return await this.updateUserUsage(userId, updateData);
+    } catch (error) {
+      console.error('❌ Error incrementing usage:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user can perform action
+   */
+  async canPerformAction(userId, action) {
+    try {
+      const usage = await this.getUserUsage(userId);
+      const subscription = await this.getUserSubscription(userId);
+      
+      if (!subscription) {
+        return { canPerform: false, reason: 'No active subscription' };
+      }
+      
+      const plan = await this.getPlanById(subscription.planId);
+      
+      switch (action) {
+        case 'upload':
+          return {
+            canPerform: usage.uploadsUsed < usage.uploadsLimit,
+            reason: usage.uploadsUsed >= usage.uploadsLimit ? 'Upload limit reached' : ''
+          };
+        case 'ai_processing':
+          return {
+            canPerform: usage.aiMinutesUsed < usage.aiMinutesLimit,
+            reason: usage.aiMinutesUsed >= usage.aiMinutesLimit ? 'AI processing limit reached' : ''
+          };
+        case 'api_call':
+          return {
+            canPerform: usage.apiCalls < plan.apiCallsPerMonth,
+            reason: usage.apiCalls >= plan.apiCallsPerMonth ? 'API call limit reached' : ''
+          };
+        default:
+          return { canPerform: false, reason: 'Unknown action' };
+      }
+    } catch (error) {
+      console.error('❌ Error checking action permission:', error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance
