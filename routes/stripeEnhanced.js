@@ -423,8 +423,8 @@ router.get('/subscription/usage', authenticateToken, async (req, res) => {
         },
         apiCalls: {
           used: usage.apiCallsUsed,
-          limit: usage.apiCallsLimit,
-          percentage: Math.round((usage.apiCallsUsed / usage.apiCallsLimit) * 100)
+          limit: planInfo.limits.apiCallsPerMonth,
+          percentage: Math.round((usage.apiCallsUsed / planInfo.limits.apiCallsPerMonth) * 100)
         }
       },
       planInfo: planInfo

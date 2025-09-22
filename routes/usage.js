@@ -163,8 +163,7 @@ router.get('/history', async (req, res) => {
             aiMinutesLimit: usage.aiMinutesLimit,
             storageUsedGB: usage.storageUsedGB,
             storageLimitGB: usage.storageLimitGB,
-            apiCallsUsed: usage.apiCallsUsed,
-            apiCallsLimit: usage.apiCallsLimit
+            apiCallsUsed: usage.apiCallsUsed
           });
         }
       } catch (error) {

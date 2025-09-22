@@ -738,8 +738,7 @@ class PrismaService {
             month,
             uploadsLimit: plan?.uploadsPerMonth || 1,
             storageLimitGB: plan?.storageGB || 1,
-            aiMinutesLimit: plan?.aiProcessingMinutes || 60,
-            apiCallsLimit: plan?.apiCallsPerMonth || 100
+            aiMinutesLimit: plan?.aiProcessingMinutes || 60
           }
         });
       }
@@ -864,11 +863,37 @@ class PrismaService {
         throw new Error('Database connection not initialized');
       }
       
-      return await this.prisma.stripeCustomer.findUnique({
-        where: {
-          userId: userId
+      // Check if stripeCustomer model exists
+      if (this.prisma.stripeCustomer && this.prisma.stripeCustomer.findUnique) {
+        return await this.prisma.stripeCustomer.findUnique({
+          where: {
+            userId: userId
+          }
+        });
+      }
+      
+      // Fallback: get from subscriptions table
+      console.log('⚠️ StripeCustomer model not available, falling back to subscriptions table');
+      const subscription = await this.prisma.subscription.findFirst({
+        where: { userId },
+        select: { 
+          stripeCustomerId: true,
+          user: {
+            select: { email: true, name: true }
+          }
         }
       });
+      
+      if (!subscription?.stripeCustomerId) {
+        return null;
+      }
+      
+      return {
+        userId,
+        stripeCustomerId: subscription.stripeCustomerId,
+        email: subscription.user?.email || null,
+        name: subscription.user?.name || null
+      };
     } catch (error) {
       console.error('❌ Error getting Stripe customer:', error);
       throw error;

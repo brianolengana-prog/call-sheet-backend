@@ -70,8 +70,7 @@ class UsageService {
           storageLimitGB: planLimits.storageGB,
           aiMinutesUsed: 0,
           aiMinutesLimit: planLimits.aiMinutesPerMonth,
-          apiCallsUsed: 0,
-          apiCallsLimit: planLimits.apiCallsPerMonth
+          apiCallsUsed: 0
         });
       }
       
@@ -111,10 +110,11 @@ class UsageService {
           
         case 'api_call':
           if (limits.apiCallsPerMonth === -1) return { canPerform: true, reason: '' };
-          const canCall = usage.apiCallsUsed + amount <= usage.apiCallsLimit;
+          const planLimits = await this.getPlanLimits(planId);
+          const canCall = usage.apiCallsUsed + amount <= planLimits.apiCallsPerMonth;
           return {
             canPerform: canCall,
-            reason: canCall ? '' : `API call limit reached. You have used ${usage.apiCallsUsed}/${usage.apiCallsLimit} calls this month.`
+            reason: canCall ? '' : `API call limit reached. You have used ${usage.apiCallsUsed}/${planLimits.apiCallsPerMonth} calls this month.`
           };
           
         case 'storage':
@@ -202,8 +202,8 @@ class UsageService {
           },
           apiCalls: {
             used: usage.apiCallsUsed,
-            limit: usage.apiCallsLimit,
-            percentage: Math.round((usage.apiCallsUsed / usage.apiCallsLimit) * 100)
+            limit: limits.apiCallsPerMonth,
+            percentage: Math.round((usage.apiCallsUsed / limits.apiCallsPerMonth) * 100)
           }
         },
         subscription: subscription ? {
@@ -238,8 +238,7 @@ class UsageService {
         storageLimitGB: limits.storageGB,
         aiMinutesUsed: 0,
         aiMinutesLimit: limits.aiMinutesPerMonth,
-        apiCallsUsed: 0,
-        apiCallsLimit: limits.apiCallsPerMonth
+        apiCallsUsed: 0
       });
       
       console.log(`✅ Monthly usage reset for user ${userId}`);
