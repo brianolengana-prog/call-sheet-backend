@@ -4,19 +4,40 @@ class PrismaService {
   constructor() {
     this.prisma = new PrismaClient({
       log: process.env.NODE_ENV === 'development' ? ['query', 'info', 'warn', 'error'] : ['error'],
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL
+        }
+      }
     });
   }
 
   /**
-   * Initialize database connection
+   * Initialize database connection with retry logic
    */
   async connect() {
-    try {
-      await this.prisma.$connect();
-      console.log('✅ Prisma connected to database');
-    } catch (error) {
-      console.error('❌ Prisma connection failed:', error);
-      throw error;
+    const maxRetries = 3;
+    let retries = 0;
+    
+    while (retries < maxRetries) {
+      try {
+        await this.prisma.$connect();
+        console.log('✅ Prisma connected to database');
+        return;
+      } catch (error) {
+        retries++;
+        console.error(`❌ Prisma connection failed (attempt ${retries}/${maxRetries}):`, error.message);
+        
+        if (retries >= maxRetries) {
+          console.error('❌ Max retries reached. Prisma connection failed permanently.');
+          throw error;
+        }
+        
+        // Wait before retrying (exponential backoff)
+        const waitTime = Math.pow(2, retries) * 1000;
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
   }
 
@@ -645,8 +666,7 @@ class PrismaService {
   async getUserSubscription(userId) {
     try {
       return await this.prisma.subscription.findFirst({
-        where: { userId },
-        include: { user: true }
+        where: { userId }
       });
     } catch (error) {
       console.error('❌ Error getting user subscription:', error);
