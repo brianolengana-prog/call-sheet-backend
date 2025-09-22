@@ -733,7 +733,7 @@ class PrismaService {
   async updateUserUsage(userId, usageData) {
     try {
       const now = new Date();
-      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const month = usageData.month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       
       return await this.prisma.usage.upsert({
         where: {
@@ -751,6 +751,242 @@ class PrismaService {
       });
     } catch (error) {
       console.error('❌ Error updating user usage:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user usage for a specific month
+   */
+  async getUserUsageForMonth(userId, month) {
+    try {
+      return await this.prisma.usage.findUnique({
+        where: {
+          userId_month: {
+            userId: userId,
+            month: month
+          }
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting user usage for month:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all usage records for a specific month (admin)
+   */
+  async getAllUsageForMonth(month) {
+    try {
+      return await this.prisma.usage.findMany({
+        where: {
+          month: month
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting all usage for month:', error);
+      throw error;
+    }
+  }
+
+  // ========================================
+  // STRIPE CUSTOMER METHODS
+  // ========================================
+
+  /**
+   * Create or update Stripe customer
+   */
+  async createOrUpdateStripeCustomer(customerData) {
+    try {
+      return await this.prisma.stripeCustomer.upsert({
+        where: {
+          userId: customerData.userId
+        },
+        update: {
+          stripeCustomerId: customerData.stripeCustomerId,
+          email: customerData.email,
+          name: customerData.name
+        },
+        create: {
+          userId: customerData.userId,
+          stripeCustomerId: customerData.stripeCustomerId,
+          email: customerData.email,
+          name: customerData.name
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error creating/updating Stripe customer:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Stripe customer by user ID
+   */
+  async getStripeCustomerByUserId(userId) {
+    try {
+      return await this.prisma.stripeCustomer.findUnique({
+        where: {
+          userId: userId
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting Stripe customer:', error);
+      throw error;
+    }
+  }
+
+  // ========================================
+  // PLAN METHODS
+  // ========================================
+
+  /**
+   * Create or update plan
+   */
+  async createOrUpdatePlan(planData) {
+    try {
+      return await this.prisma.plan.upsert({
+        where: {
+          id: planData.id
+        },
+        update: {
+          name: planData.name,
+          type: planData.type || 'starter',
+          description: planData.description,
+          price: planData.price,
+          interval: planData.interval,
+          stripeProductId: planData.stripeProductId,
+          stripePriceId: planData.stripePriceId,
+          uploadsPerMonth: planData.uploadsPerMonth,
+          maxContacts: planData.maxContacts,
+          storageGB: planData.storageGB,
+          aiProcessingMinutes: planData.aiProcessingMinutes,
+          apiCallsPerMonth: planData.apiCallsPerMonth,
+          features: planData.features,
+          popular: planData.popular,
+          isActive: planData.isActive,
+          sortOrder: planData.sortOrder
+        },
+        create: {
+          id: planData.id,
+          name: planData.name,
+          type: planData.type || 'starter',
+          description: planData.description,
+          price: planData.price,
+          interval: planData.interval,
+          stripeProductId: planData.stripeProductId,
+          stripePriceId: planData.stripePriceId,
+          uploadsPerMonth: planData.uploadsPerMonth,
+          maxContacts: planData.maxContacts,
+          storageGB: planData.storageGB,
+          aiProcessingMinutes: planData.aiProcessingMinutes,
+          apiCallsPerMonth: planData.apiCallsPerMonth,
+          features: planData.features,
+          popular: planData.popular,
+          isActive: planData.isActive,
+          sortOrder: planData.sortOrder
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error creating/updating plan:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get plan by Stripe price ID
+   */
+  async getPlanByStripePriceId(stripePriceId) {
+    try {
+      return await this.prisma.plan.findFirst({
+        where: {
+          stripePriceId: stripePriceId
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting plan by Stripe price ID:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update plan
+   */
+  async updatePlan(planId, updateData) {
+    try {
+      return await this.prisma.plan.update({
+        where: {
+          id: planId
+        },
+        data: updateData
+      });
+    } catch (error) {
+      console.error('❌ Error updating plan:', error);
+      throw error;
+    }
+  }
+
+  // ========================================
+  // SUBSCRIPTION METHODS
+  // ========================================
+
+  /**
+   * Create or update subscription
+   */
+  async createOrUpdateSubscription(subscriptionData) {
+    try {
+      return await this.prisma.subscription.upsert({
+        where: {
+          stripeSubscriptionId: subscriptionData.stripeSubscriptionId
+        },
+        update: {
+          userId: subscriptionData.userId,
+          planId: subscriptionData.planId,
+          status: subscriptionData.status,
+          currentPeriodStart: subscriptionData.currentPeriodStart,
+          currentPeriodEnd: subscriptionData.currentPeriodEnd,
+          cancelAtPeriodEnd: subscriptionData.cancelAtPeriodEnd
+        },
+        create: {
+          userId: subscriptionData.userId,
+          planId: subscriptionData.planId,
+          stripeCustomerId: subscriptionData.stripeCustomerId || '',
+          stripeSubscriptionId: subscriptionData.stripeSubscriptionId,
+          status: subscriptionData.status,
+          currentPeriodStart: subscriptionData.currentPeriodStart,
+          currentPeriodEnd: subscriptionData.currentPeriodEnd,
+          cancelAtPeriodEnd: subscriptionData.cancelAtPeriodEnd
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error creating/updating subscription:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update subscription
+   */
+  async updateSubscription(stripeSubscriptionId, updateData) {
+    try {
+      return await this.prisma.subscription.update({
+        where: {
+          stripeSubscriptionId: stripeSubscriptionId
+        },
+        data: updateData
+      });
+    } catch (error) {
+      console.error('❌ Error updating subscription:', error);
       throw error;
     }
   }

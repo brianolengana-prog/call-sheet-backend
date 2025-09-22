@@ -1,43 +1,58 @@
+/**
+ * Stripe Webhook Middleware
+ * Validates Stripe webhook signatures
+ */
+
 const Stripe = require('stripe');
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2023-10-16',
+});
+
 /**
- * Middleware to validate Stripe webhook signatures
+ * Validate Stripe webhook signature
  */
 const validateStripeWebhook = (req, res, next) => {
-  const sig = req.headers['stripe-signature'];
-  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!sig || !endpointSecret) {
-    return res.status(400).json({
-      error: {
-        message: 'Missing webhook signature or secret',
-        type: 'webhook_error',
-        status: 400
-      }
-    });
-  }
-
   try {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2023-10-16',
-    });
+    const signature = req.headers['stripe-signature'];
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-    // Verify the webhook signature
-    const event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-    
-    // Add the verified event to the request
-    req.stripeEvent = event;
+    if (!signature) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing Stripe signature'
+      });
+    }
+
+    if (!webhookSecret) {
+      console.warn('⚠️ STRIPE_WEBHOOK_SECRET not configured, skipping signature validation');
+      return next();
+    }
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
+    } catch (err) {
+      console.error('❌ Webhook signature verification failed:', err.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid signature'
+      });
+    }
+
+    // Attach the verified event to the request
+    req.body = event;
     next();
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).json({
-      error: {
-        message: 'Invalid webhook signature',
-        type: 'webhook_error',
-        status: 400
-      }
+
+  } catch (error) {
+    console.error('❌ Webhook validation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Webhook validation failed'
     });
   }
 };
 
-module.exports = { validateStripeWebhook };
+module.exports = {
+  validateStripeWebhook
+};

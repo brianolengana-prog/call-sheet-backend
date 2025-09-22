@@ -8,7 +8,6 @@ require('dotenv').config();
 // Initialize Prisma
 const prismaService = require('./services/prismaService');
 
-const stripeRoutes = require('./routes/stripe');
 const stripeAdminRoutes = require('./routes/stripe-admin');
 const authRoutes = require('./routes/auth');
 const googleAuthRoutes = require('./routes/googleAuth');
@@ -16,6 +15,9 @@ const clerkWebhookRoutes = require('./routes/clerkWebhooks');
 const chatRoutes = require('./routes/chat');
 const supportRoutes = require('./routes/support');
 const subscriptionRoutes = require('./routes/subscription');
+const extractionRoutes = require('./routes/extraction');
+const usageRoutes = require('./routes/usage');
+const stripeEnhancedRoutes = require('./routes/stripeEnhanced');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
@@ -154,9 +156,11 @@ app.use(csrfProtection);
 app.use('/api/auth', authRateLimit, authRoutes);
 app.use('/api/google-auth', authStatusRateLimit, googleAuthRoutes);
 app.use('/api/clerk', clerkWebhookRoutes); // No rate limiting for webhooks
-app.use('/api/stripe', stripeRateLimit, stripeRoutes);
 app.use('/api/stripe-admin', stripeRateLimit, stripeAdminRoutes);
 app.use('/api/subscription', apiRateLimit, subscriptionRoutes);
+app.use('/api/extraction', apiRateLimit, extractionRoutes);
+app.use('/api/usage', apiRateLimit, usageRoutes);
+app.use('/api/stripe', stripeRateLimit, stripeEnhancedRoutes);
 app.use('/api/chat', apiRateLimit, chatRoutes);
 app.use('/api/support', apiRateLimit, supportRoutes);
 
