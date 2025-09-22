@@ -59,6 +59,10 @@ class PrismaService {
    */
   async healthCheck() {
     try {
+      if (!this.prisma) {
+        return { status: 'unhealthy', error: 'Prisma client not initialized', timestamp: new Date().toISOString() };
+      }
+      
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'healthy', timestamp: new Date().toISOString() };
     } catch (error) {
@@ -855,6 +859,11 @@ class PrismaService {
    */
   async getStripeCustomerByUserId(userId) {
     try {
+      if (!this.prisma) {
+        console.error('❌ Prisma client is not initialized');
+        throw new Error('Database connection not initialized');
+      }
+      
       return await this.prisma.stripeCustomer.findUnique({
         where: {
           userId: userId

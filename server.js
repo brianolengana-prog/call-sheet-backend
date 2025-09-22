@@ -140,13 +140,25 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    service: 'CallSheet AI Stripe Backend',
-    version: '1.0.0'
-  });
+app.get('/health', async (req, res) => {
+  try {
+    const dbHealth = await prismaService.healthCheck();
+    res.status(200).json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      service: 'CallSheet AI Stripe Backend',
+      version: '1.0.0',
+      database: dbHealth
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      service: 'CallSheet AI Stripe Backend',
+      version: '1.0.0',
+      error: error.message
+    });
+  }
 });
 
 // CSRF protection (after body parsing)

@@ -169,7 +169,20 @@ class StripeService {
    */
   async getCustomerInfo(userId) {
     try {
-      const customer = await prismaService.getStripeCustomerByUserId(userId);
+      let customer;
+      try {
+        customer = await prismaService.getStripeCustomerByUserId(userId);
+      } catch (dbError) {
+        console.error('❌ Database error in getCustomerInfo:', dbError);
+        // Fallback: return free plan if database is unavailable
+        return {
+          hasSubscription: false,
+          plan: 'free',
+          status: 'inactive',
+          error: 'Database temporarily unavailable'
+        };
+      }
+      
       if (!customer) {
         return {
           hasSubscription: false,
