@@ -118,15 +118,18 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     // Save extracted contacts to database
+    let jobId = null;
     if (result.contacts && result.contacts.length > 0) {
       try {
         // Create a job record for this extraction
         const job = await prismaService.createJob({
           userId,
           title: `File Upload - ${req.file.originalname}`,
-          status: 'completed',
-          extractedContactsCount: result.contacts.length
+          fileName: req.file.originalname,
+          status: 'completed'
         });
+
+        jobId = job.id;
 
         // Save contacts to database
         const contactsToSave = result.contacts.map(contact => ({
@@ -144,7 +147,10 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
       } catch (dbError) {
         console.error('❌ Database save error:', dbError);
-        // Don't fail the extraction if database save fails
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to save contacts to database'
+        });
       }
     }
 
@@ -158,6 +164,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     res.json({
       success: true,
       contacts: result.contacts,
+      jobId: jobId,
       usage: result.usage,
       processedChunks: result.processedChunks,
       documentType: result.documentType,
@@ -227,8 +234,7 @@ router.post('/extract', async (req, res) => {
         const job = await prismaService.createJob({
           userId,
           title: `Call Sheet Extraction - ${new Date().toLocaleDateString()}`,
-          status: 'completed',
-          extractedContactsCount: result.contacts.length
+          status: 'completed'
         });
 
         // Save contacts to database

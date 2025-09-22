@@ -18,6 +18,7 @@ const subscriptionRoutes = require('./routes/subscription');
 const extractionRoutes = require('./routes/extraction');
 const usageRoutes = require('./routes/usage');
 const stripeEnhancedRoutes = require('./routes/stripeEnhanced');
+const contactsRoutes = require('./routes/contacts');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
@@ -48,89 +49,80 @@ app.use(ipFilter);
 // Suspicious activity detection
 app.use(suspiciousActivityDetector);
 
+// Security headers
+app.use(securityHeaders);
+
 // Security logging
 app.use(securityLogger);
 
-// Enhanced security headers (replaces basic helmet)
-app.use(securityHeaders);
-
-// Basic helmet with custom config
+// Helmet for additional security headers
 app.use(helmet({
-  contentSecurityPolicy: false, // We handle this in securityHeaders
-  crossOriginEmbedderPolicy: false // Custom handled
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'", "https://api.stripe.com", "https://hooks.stripe.com"],
+      frameSrc: ["'self'", "https://js.stripe.com", "https://hooks.stripe.com"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  crossOriginEmbedderPolicy: false
 }));
 
-// Request validation
-app.use(validateRequest);
-
-// General rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
-
-// CORS configuration with multiple allowed origins
+// CORS configuration
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:3000',
-  'http://localhost:5173', // Vite dev server
-  'http://localhost:3000', // React dev server
-  'https://sjcallsheets-project.vercel.app', // Production frontend
-  'https://sjcallsheets-project-git-main-servi.vercel.app', // Vercel preview
-  'https://*.vercel.app', // Vercel preview domains
-  'https://www.callsheetconvert.com', // Live production domain
+  'https://www.callsheetconvert.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://sjcallsheets-project.vercel.app',
+  'https://sjcallsheets-project-git-main-servi.vercel.app',
+  'https://*.vercel.app',
+  'https://www.callsheetconvert.com',
   'https://callsheetconvert.com',
   'https://www.callsheetconverter.com'
 ];
 
-// Log CORS configuration on startup
-console.log('🌐 CORS Configuration:');
-console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL || 'http://localhost:3000');
-console.log('  - Allowed Origins:', allowedOrigins);
-
 app.use(cors({
-    origin: function (origin, callback) {
-      // Log CORS requests for debugging
-      console.log('🔍 CORS Request from origin:', origin);
-      
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        console.log('✅ CORS: Allowing request with no origin');
-        return callback(null, true);
-      }
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
-        console.log('✅ CORS: Origin allowed from allowedOrigins list');
-        return callback(null, origin); // Return the actual origin, not true
-      }
-      
-      // Check for Vercel preview domains
-      if (origin && origin.endsWith('.vercel.app')) {
-        console.log('✅ CORS: Origin allowed (Vercel preview domain)');
-        return callback(null, origin); // Return the actual origin
-      }
-      
-      // Check for localhost with any port
-      if (origin && origin.startsWith('http://localhost:')) {
-        console.log('✅ CORS: Origin allowed (localhost)');
-        return callback(null, origin); // Return the actual origin
-      }
-      
-      console.log('❌ CORS: Origin rejected:', origin);
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-    exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
-    preflightContinue: false,
-    optionsSuccessStatus: 200
-  }));
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('✅ CORS: Allowing request with no origin');
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ CORS: Origin allowed from allowedOrigins list');
+      return callback(null, origin); // Return the actual origin, not true
+    }
+    
+    // Check for Vercel preview domains
+    if (origin && origin.endsWith('.vercel.app')) {
+      console.log('✅ CORS: Origin allowed (Vercel preview domain)');
+      return callback(null, origin); // Return the actual origin
+    }
+    
+    // Check for localhost with any port
+    if (origin && origin.startsWith('http://localhost:')) {
+      console.log('✅ CORS: Origin allowed (localhost)');
+      return callback(null, origin); // Return the actual origin
+    }
+    
+    console.log('❌ CORS: Origin rejected:', origin);
+    const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+    return callback(new Error(msg), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
+  preflightContinue: false,
+  optionsSuccessStatus: 200
+}));
 
 // Cookie parsing middleware
 app.use(cookieParser());
@@ -175,6 +167,8 @@ app.use('/api/usage', apiRateLimit, usageRoutes);
 app.use('/api/stripe', stripeRateLimit, stripeEnhancedRoutes);
 app.use('/api/chat', apiRateLimit, chatRoutes);
 app.use('/api/support', apiRateLimit, supportRoutes);
+app.use('/api/contacts', apiRateLimit, contactsRoutes);
+app.use('/api/jobs', apiRateLimit, contactsRoutes); // Jobs are handled by contacts route
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -198,49 +192,62 @@ const initializeServer = async () => {
     // Cleanup old logs on startup
     await authLogger.cleanupOldLogs(90); // Keep logs for 90 days
     
-    // Initialize security monitoring
+    console.log('✅ Prisma connected to database');
     console.log('🔐 Security monitoring initialized');
     
-    // Start server
+    // Start the server
     app.listen(PORT, () => {
       console.log(`🚀 Enhanced Secure Backend Server running on port ${PORT}`);
-      console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+      console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'Not configured'}`);
       console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`💳 Stripe Mode: ${process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_') ? 'TEST' : 'LIVE'}`);
-      console.log(`📡 Webhook Mode: Development (manual sync enabled)`);
+      console.log(`💳 Stripe Mode: ${process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') ? 'LIVE' : 'TEST'}`);
+      console.log(`📡 Webhook Mode: ${process.env.NODE_ENV === 'production' ? 'Production' : 'Development (manual sync enabled)'}`);
       console.log(`🛡️  Security Features: ✅ Authentication ✅ Rate Limiting ✅ CSRF Protection ✅ Session Management`);
       console.log(`📊 Logging: Authentication events, Security incidents, Rate limiting`);
-      
-      // Schedule periodic log cleanup (daily)
-      setInterval(async () => {
-        try {
-          await authLogger.cleanupOldLogs(90);
-        } catch (error) {
-          console.error('Log cleanup error:', error);
-        }
-      }, 24 * 60 * 60 * 1000); // 24 hours
     });
     
   } catch (error) {
-    console.error('Server initialization failed:', error);
+    console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 };
 
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Received SIGINT. Graceful shutdown...');
+  try {
+    await prismaService.disconnect();
+    console.log('✅ Database connection closed');
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 Received SIGTERM. Graceful shutdown...');
+  try {
+    await prismaService.disconnect();
+    console.log('✅ Database connection closed');
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
 // Initialize the server
 initializeServer();
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  await prismaService.disconnect();
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  await prismaService.disconnect();
-  process.exit(0);
-});
-
-module.exports = app;
