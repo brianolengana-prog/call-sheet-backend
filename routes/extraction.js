@@ -11,7 +11,8 @@ const { authenticateToken } = require('../middleware/auth');
 const ExtractionService = require('../services/extractionService');
 let customExtractionService;
 try {
-  customExtractionService = require('../services/customExtractionService');
+  const CustomExtractionServiceClass = require('../services/customExtractionService');
+  customExtractionService = new CustomExtractionServiceClass();
   console.log('✅ Custom extraction service loaded successfully');
 } catch (error) {
   console.warn('⚠️ Custom extraction service not available:', error.message);
