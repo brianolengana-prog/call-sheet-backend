@@ -300,12 +300,14 @@ router.post('/', async (req, res) => {
 router.get('/export', async (req, res) => {
   try {
     const userId = req.user.id;
-    const { ids } = req.query;
+    const { ids, jobId, format = 'csv' } = req.query;
 
     let where = { userId };
     if (ids) {
       const contactIds = ids.split(',');
       where.id = { in: contactIds };
+    } else if (jobId) {
+      where.jobId = jobId;
     }
 
     const contacts = await prismaService.prisma.contact.findMany({
@@ -321,17 +323,32 @@ router.get('/export', async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // Generate CSV
+    if (format === 'json') {
+      const payload = contacts.map(c => ({
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        role: c.role,
+        company: c.company,
+        jobTitle: c.job?.title || null,
+        createdAt: c.createdAt
+      }));
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', 'attachment; filename="contacts.json"');
+      return res.send(JSON.stringify(payload, null, 2));
+    }
+
+    // default CSV
     const csvHeader = 'Name,Email,Phone,Role,Company,Job Title,Extracted Date\n';
     const csvRows = contacts.map(contact => 
       `"${contact.name}","${contact.email || ''}","${contact.phone || ''}","${contact.role || ''}","${contact.company || ''}","${contact.job?.title || ''}","${contact.createdAt?.toISOString().split('T')[0] || ''}"`
     ).join('\n');
-    
     const csv = csvHeader + csvRows;
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="contacts.csv"');
-    res.send(csv);
+    return res.send(csv);
 
   } catch (error) {
     console.error('❌ Error exporting contacts:', error);
