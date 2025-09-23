@@ -147,7 +147,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
           userId,
           title: `File Upload - ${req.file.originalname}`,
           fileName: req.file.originalname,
-          status: 'completed'
+          status: 'COMPLETED'
         });
 
         jobId = job.id;
@@ -527,7 +527,7 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
           userId,
           title: `File Upload - ${req.file.originalname} (${extractionMethod})`,
           fileName: req.file.originalname,
-          status: 'completed'
+          status: 'COMPLETED'
         });
 
         jobId = job.id;
