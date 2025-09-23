@@ -443,9 +443,8 @@ class PrismaService {
         update: {},
         create: {
           userId: jobData.userId,
-          // minimal required fields; add sensible defaults if your schema requires more
-          avatarUrl: null,
-          phone: null
+          // optional fields; keep minimal to satisfy FK
+          avatarUrl: null
         }
       });
     }
