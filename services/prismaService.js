@@ -530,9 +530,19 @@ class PrismaService {
    * Create multiple contacts
    */
   async createContacts(contactsData) {
-    return await this.prisma.contact.createMany({
-      data: contactsData
-    });
+    // Sanitize to only include schema fields and normalize values
+    const sanitized = (Array.isArray(contactsData) ? contactsData : []).map((c) => ({
+      name: c?.name || 'Unknown',
+      email: typeof c?.email === 'string' ? c.email : null,
+      phone: typeof c?.phone === 'string' ? c.phone : null,
+      role: c?.role || null,
+      company: c?.company || null,
+      isSelected: c?.isSelected === false ? false : true,
+      jobId: c?.jobId,
+      userId: c?.userId
+    })).filter(c => c.jobId && c.userId);
+
+    return await this.createContactsInChunks(sanitized, 500);
   }
 
   /**
