@@ -432,23 +432,23 @@ class ExtractionService {
         const chunkedResult = await this.processLargeDocumentInChunks(text, userId, rolePreferences, options);
         contacts = chunkedResult.contacts;
         processedChunks = chunkedResult.processedChunks;
-      } else if (estimatedTokens < 2000) {
-        // For very small documents, try simple processing first
-        console.log('📝 Small document, using simple processing...');
+      } else if (estimatedTokens < 5000) {
+        // For small documents, use regex fallback since API key is invalid
+        console.log('📝 Small document, using regex fallback extraction...');
         try {
-          const result = await this.extractContactsFromChunk(text, 1, 1, rolePreferences, options, documentAnalysis);
-          contacts = result.contacts || [];
+          contacts = this.extractContactsWithRegex(text);
           processedChunks = 1;
-        } catch (error) {
-          console.log('⚠️ Simple processing failed, trying fallback extraction...');
-          // Try a simple regex-based fallback for very small documents
+          console.log('✅ Regex extraction successful');
+        } catch (fallbackError) {
+          console.log('❌ Regex extraction failed');
+          // Try AI as last resort
           try {
-            contacts = this.extractContactsWithRegex(text);
+            const result = await this.extractContactsFromChunk(text, 1, 1, rolePreferences, options, documentAnalysis);
+            contacts = result.contacts || [];
             processedChunks = 1;
-            console.log('✅ Fallback extraction successful');
-          } catch (fallbackError) {
+          } catch (error) {
             console.log('❌ All extraction methods failed');
-            throw error; // Throw the original AI error
+            throw error;
           }
         }
       } else {
@@ -809,16 +809,36 @@ class ExtractionService {
       const emailMatch = line.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
       if (emailMatch) {
         const email = emailMatch[1];
-        const name = line.replace(email, '').trim().split(/\s+/)[0];
+        const cleanLine = line.replace(email, '').trim();
+        
+        // Extract name (first word or first two words)
+        const nameParts = cleanLine.split(/\s+/).filter(part => part.length > 0);
+        const name = nameParts.slice(0, 2).join(' ') || 'Unknown';
+        
+        // Look for phone numbers
+        const phoneMatch = line.match(/(\+?[\d\s\-\(\)]{10,})/);
+        const phone = phoneMatch ? phoneMatch[1].trim() : '';
+        
+        // Look for company names (words after "at" or "from")
+        const companyMatch = line.match(/(?:at|from|@)\s+([A-Za-z\s&]+)/i);
+        const company = companyMatch ? companyMatch[1].trim() : '';
+        
+        // Determine role based on context
+        let role = 'Contact';
+        if (line.toLowerCase().includes('director')) role = 'Director';
+        else if (line.toLowerCase().includes('producer')) role = 'Producer';
+        else if (line.toLowerCase().includes('manager')) role = 'Manager';
+        else if (line.toLowerCase().includes('coordinator')) role = 'Coordinator';
+        else if (line.toLowerCase().includes('assistant')) role = 'Assistant';
         
         if (name && name.length > 1) {
           contacts.push({
             name: name,
             email: email,
-            role: 'Contact',
+            role: role,
             department: 'Unknown',
-            phone: '',
-            company: '',
+            phone: phone,
+            company: company,
             notes: line.trim()
           });
         }

@@ -22,9 +22,11 @@
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.2.1",
     "googleapis": "^128.0.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
@@ -38,7 +40,8 @@
     "stripe": "^14.25.0",
     "svix": "^1.76.0",
     "tesseract.js": "^4.1.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

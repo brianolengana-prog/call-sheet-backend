@@ -19,6 +19,7 @@ const extractionRoutes = require('./routes/extraction');
 const usageRoutes = require('./routes/usage');
 const stripeEnhancedRoutes = require('./routes/stripeEnhanced');
 const contactsRoutes = require('./routes/contacts');
+const customExtractionRoutes = require('./routes/customExtraction');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
@@ -169,6 +170,7 @@ app.use('/api/chat', apiRateLimit, chatRoutes);
 app.use('/api/support', apiRateLimit, supportRoutes);
 app.use('/api/contacts', apiRateLimit, contactsRoutes);
 app.use('/api/jobs', apiRateLimit, contactsRoutes); // Jobs are handled by contacts route
+app.use('/api/custom-extraction', apiRateLimit, customExtractionRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
