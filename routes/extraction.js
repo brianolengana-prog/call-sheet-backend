@@ -459,42 +459,26 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
       case 'custom':
         console.log('🔧 Using custom extraction method');
         if (!customExtractionService) {
-          console.warn('⚠️ Custom extraction service not available, falling back to AI');
-          // Fallback to AI extraction
-          const customFallbackService = new ExtractionService();
-          const customExtractedText = await customFallbackService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
-          if (!customExtractedText || customExtractedText.trim().length < 10) {
-            throw new Error('Could not extract text from file or file is too short');
-          }
-          result = await customFallbackService.extractContacts(
-            customExtractedText, 
-            parsedRolePreferences, 
-            parsedOptions,
-            userId
+          console.warn('⚠️ Custom extraction service not available');
+          return res.status(503).json({
+            success: false,
+            error: 'Custom extraction service is not available. Please choose AI or Auto.'
+          });
+        }
+        try {
+          result = await customExtractionService.extractContacts(
+            fileBuffer,
+            req.file.mimetype,
+            req.file.originalname,
+            { ...parsedOptions, rolePreferences: parsedRolePreferences, userId }
           );
-        } else {
-          try {
-            result = await customExtractionService.extractContacts(
-              fileBuffer,
-              req.file.mimetype,
-              req.file.originalname,
-              { ...parsedOptions, rolePreferences: parsedRolePreferences, userId }
-            );
-          } catch (customError) {
-            console.warn('⚠️ Custom extraction failed, falling back to AI:', customError.message);
-            // Fallback to AI extraction
-            const customFallbackService = new ExtractionService();
-            const customExtractedText = await customFallbackService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
-            if (!customExtractedText || customExtractedText.trim().length < 10) {
-              throw new Error('Could not extract text from file or file is too short');
-            }
-            result = await customFallbackService.extractContacts(
-              customExtractedText, 
-              parsedRolePreferences, 
-              parsedOptions,
-              userId
-            );
-          }
+        } catch (customError) {
+          console.warn('❌ Custom extraction failed:', customError.message);
+          return res.status(500).json({
+            success: false,
+            error: 'Custom extraction failed',
+            details: customError.message
+          });
         }
         break;
 
