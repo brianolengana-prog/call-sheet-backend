@@ -1,6 +1,6 @@
 /**
- * Enhanced Call Sheet Extraction Service
- * Handles AI-powered contact extraction from call sheets with advanced document processing
+ * Production-Ready Call Sheet Extraction Service
+ * Robust document processing with proper error handling and library management
  */
 
 const fetch = require('node-fetch');
@@ -14,100 +14,176 @@ class ExtractionService {
     this.openAIApiKey = process.env.OPENAI_API_KEY;
     this.openAIBaseUrl = 'https://api.openai.com/v1';
     
-    // Document processing libraries (will be loaded dynamically)
-    this.libraries = {
-      pdfjs: null,
-      mammoth: null,
-      xlsx: null,
-      tesseract: null
-    };
+    // Library management with proper initialization
+    this.libraries = new Map();
+    this.initializationPromise = null;
+    this.isInitialized = false;
+    
+    // Initialize libraries immediately and handle errors gracefully
+    this.initializeLibraries().catch(error => {
+      console.error('❌ Failed to initialize extraction libraries:', error.message);
+      // Service will still work with on-demand loading
+    });
   }
 
   /**
-   * Initialize document processing libraries
+   * Initialize all document processing libraries
+   * This method is called once and handles all library loading
    */
   async initializeLibraries() {
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+
+    this.initializationPromise = this._loadLibraries();
+    await this.initializationPromise;
+    this.isInitialized = true;
+    
+    return this.initializationPromise;
+  }
+
+  async _loadLibraries() {
+    const libraryConfigs = [
+      { name: 'pdfjs', module: 'pdfjs-dist', required: true },
+      { name: 'mammoth', module: 'mammoth', required: true },
+      { name: 'xlsx', module: 'xlsx', required: true },
+      { name: 'tesseract', module: 'tesseract.js', required: false }
+    ];
+
+    const loadPromises = libraryConfigs.map(async ({ name, module, required }) => {
+      try {
+        const lib = require(module);
+        this.libraries.set(name, lib);
+        console.log(`✅ ${name} library loaded successfully`);
+        return { name, success: true };
+      } catch (error) {
+        if (required) {
+          console.error(`❌ Required library ${name} failed to load:`, error.message);
+          throw new Error(`Required library ${name} not available: ${error.message}`);
+        } else {
+          console.warn(`⚠️ Optional library ${name} not available:`, error.message);
+          return { name, success: false, error: error.message };
+        }
+      }
+    });
+
+    const results = await Promise.allSettled(loadPromises);
+    const failures = results.filter(result => result.status === 'rejected');
+    
+    if (failures.length > 0) {
+      console.error('❌ Some required libraries failed to load:', failures);
+      throw new Error('Failed to load required extraction libraries');
+    }
+
+    console.log('✅ All extraction libraries initialized successfully');
+  }
+
+  /**
+   * Ensure library is loaded before use
+   * @param {string} libraryName - Name of the library to ensure is loaded
+   * @param {boolean} required - Whether the library is required
+   */
+  async ensureLibrary(libraryName, required = true) {
+    // If already loaded, return immediately
+    if (this.libraries.has(libraryName)) {
+      return this.libraries.get(libraryName);
+    }
+
+    // If initialization is in progress, wait for it
+    if (this.initializationPromise && !this.isInitialized) {
+      await this.initializationPromise;
+      if (this.libraries.has(libraryName)) {
+        return this.libraries.get(libraryName);
+      }
+    }
+
+    // Try to load the library on-demand
     try {
-      // Load PDF processing
-      this.libraries.pdfjs = require('pdfjs-dist');
-      
-      // Load Word document processing
-      this.libraries.mammoth = require('mammoth');
-      
-      // Load Excel processing
-      this.libraries.xlsx = require('xlsx');
-      
-      // Load OCR processing
-      this.libraries.tesseract = require('tesseract.js');
-      
-      console.log('✅ Document processing libraries loaded');
+      const libraryConfigs = {
+        pdfjs: 'pdfjs-dist',
+        mammoth: 'mammoth',
+        xlsx: 'xlsx',
+        tesseract: 'tesseract.js'
+      };
+
+      const moduleName = libraryConfigs[libraryName];
+      if (!moduleName) {
+        throw new Error(`Unknown library: ${libraryName}`);
+      }
+
+      const lib = require(moduleName);
+      this.libraries.set(libraryName, lib);
+      console.log(`✅ ${libraryName} library loaded on-demand`);
+      return lib;
     } catch (error) {
-      console.warn('⚠️ Some document processing libraries not available:', error.message);
+      const message = `${libraryName} processing library not available: ${error.message}`;
+      if (required) {
+        throw new Error(message);
+      } else {
+        console.warn(`⚠️ ${message}`);
+        return null;
+      }
     }
   }
 
   /**
-   * Process uploaded file and extract text
+   * Process uploaded file and extract text with memory management
+   * @param {Buffer} buffer - File buffer
+   * @param {string} mimeType - MIME type of the file
+   * @param {string} fileName - Original filename
+   * @returns {Promise<string>} Extracted text
    */
-  async processFile(filePath, mimeType) {
+  async processFile(buffer, mimeType, fileName) {
     try {
-      const fileExtension = path.extname(filePath).toLowerCase();
-      const buffer = await fs.readFile(filePath);
+      console.log(`📄 Processing file: ${fileName} (${mimeType})`);
+      console.log(`📊 File size: ${(buffer.length / 1024 / 1024).toFixed(2)} MB`);
       
-      console.log(`📄 Processing file: ${filePath} (${mimeType})`);
+      // Check file size limits
+      const maxFileSize = 50 * 1024 * 1024; // 50MB limit
+      if (buffer.length > maxFileSize) {
+        throw new Error(`File too large: ${(buffer.length / 1024 / 1024).toFixed(2)}MB. Maximum allowed size is 50MB.`);
+      }
       
-      // PDF processing
+      // Ensure libraries are loaded
+      await this.initializeLibraries();
+      
+      const fileExtension = path.extname(fileName).toLowerCase();
+      let extractedText = '';
+
+      // Route to appropriate extraction method based on file type
       if (mimeType === 'application/pdf' || fileExtension === '.pdf') {
-        return await this.extractTextFromPDF(buffer);
+        extractedText = await this.extractTextFromPDF(buffer);
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileExtension === '.docx') {
+        extractedText = await this.extractTextFromDOCX(buffer);
+      } else if (mimeType === 'application/msword' || fileExtension === '.doc') {
+        extractedText = await this.extractTextFromDOC(buffer);
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || fileExtension === '.xlsx') {
+        extractedText = await this.extractTextFromXLSX(buffer);
+      } else if (mimeType === 'application/vnd.ms-excel' || fileExtension === '.xls') {
+        extractedText = await this.extractTextFromXLS(buffer);
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || fileExtension === '.pptx') {
+        extractedText = await this.extractTextFromPPTX(buffer);
+      } else if (mimeType === 'text/csv' || fileExtension === '.csv') {
+        extractedText = await this.extractTextFromCSV(buffer);
+      } else if (mimeType === 'application/rtf' || fileExtension === '.rtf') {
+        extractedText = await this.extractTextFromRTF(buffer);
+      } else if (mimeType.startsWith('image/')) {
+        extractedText = await this.extractTextFromImage(buffer);
+      } else {
+        // Try to extract as plain text
+        extractedText = await this.extractTextFromPlainText(buffer);
       }
-      
-      // Word documents
-      if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileExtension === '.docx') {
-        return await this.extractTextFromDOCX(buffer);
+
+      if (!extractedText || extractedText.trim().length === 0) {
+        throw new Error('No text content found in the document');
       }
+
+      console.log(`✅ File processed successfully: ${extractedText.length} characters extracted`);
       
-      // Legacy Word documents
-      if (mimeType === 'application/msword' || fileExtension === '.doc') {
-        return await this.extractTextFromDOC(buffer);
-      }
+      // Clear buffer from memory to free up space
+      buffer = null;
       
-      // Excel files
-      if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || fileExtension === '.xlsx') {
-        return await this.extractTextFromXLSX(buffer);
-      }
-      
-      // Legacy Excel files
-      if (mimeType === 'application/vnd.ms-excel' || fileExtension === '.xls') {
-        return await this.extractTextFromXLS(buffer);
-      }
-      
-      // PowerPoint files
-      if (mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || fileExtension === '.pptx') {
-        return await this.extractTextFromPPTX(buffer);
-      }
-      
-      // CSV files
-      if (mimeType === 'text/csv' || fileExtension === '.csv') {
-        return await this.extractTextFromCSV(buffer);
-      }
-      
-      // RTF files
-      if (mimeType === 'application/rtf' || fileExtension === '.rtf') {
-        return await this.extractTextFromRTF(buffer);
-      }
-      
-      // Image files (OCR)
-      if (mimeType.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.gif', '.bmp'].includes(fileExtension)) {
-        return await this.extractTextFromImage(buffer);
-      }
-      
-      // Plain text files
-      if (mimeType === 'text/plain' || fileExtension === '.txt') {
-        return buffer.toString('utf-8');
-      }
-      
-      throw new Error(`Unsupported file type: ${mimeType}`);
-      
+      return extractedText.trim();
     } catch (error) {
       console.error('❌ File processing error:', error);
       throw new Error(`File processing failed: ${error.message}`);
@@ -115,25 +191,22 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from PDF
+   * Extract text from PDF documents
    */
   async extractTextFromPDF(buffer) {
-    if (!this.libraries.pdfjs) {
-      throw new Error('PDF processing library not available');
-    }
+    const pdfjs = await this.ensureLibrary('pdfjs', true);
     
     try {
-      const pdf = await this.libraries.pdfjs.getDocument({ data: buffer }).promise;
+      const pdf = await pdfjs.getDocument({ data: buffer }).promise;
       let fullText = '';
       
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const pageText = textContent.items
-          .filter(item => 'str' in item)
           .map(item => item.str)
           .join(' ');
-        fullText += pageText + '\n';
+        fullText += `\n--- Page ${i} ---\n${pageText}\n`;
       }
       
       console.log('📄 PDF processed successfully');
@@ -144,15 +217,13 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from DOCX
+   * Extract text from DOCX documents
    */
   async extractTextFromDOCX(buffer) {
-    if (!this.libraries.mammoth) {
-      throw new Error('DOCX processing library not available');
-    }
+    const mammoth = await this.ensureLibrary('mammoth', true);
     
     try {
-      const result = await this.libraries.mammoth.extractRawText({ buffer });
+      const result = await mammoth.extractRawText({ buffer });
       console.log('📄 DOCX processed successfully');
       return result.value;
     } catch (error) {
@@ -161,41 +232,39 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from legacy DOC
+   * Extract text from legacy DOC documents
    */
   async extractTextFromDOC(buffer) {
-    // Basic text extraction for .doc files
-    const uint8Array = new Uint8Array(buffer);
-    let text = '';
-    
-    for (let i = 0; i < uint8Array.length; i++) {
-      if (uint8Array[i] >= 32 && uint8Array[i] <= 126) {
-        text += String.fromCharCode(uint8Array[i]);
-      } else if (uint8Array[i] === 10 || uint8Array[i] === 13) {
-        text += '\n';
-      }
+    // For legacy DOC files, we'll try to extract as much text as possible
+    // This is a basic implementation - for production, consider using antiword or similar
+    try {
+      const text = buffer.toString('utf-8');
+      // Basic text extraction from DOC binary format
+      const cleanedText = text
+        .replace(/[\x00-\x1F\x7F-\x9F]/g, ' ') // Remove control characters
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim();
+      
+      console.log('📄 Legacy DOC processed successfully');
+      return cleanedText;
+    } catch (error) {
+      throw new Error(`DOC processing failed: ${error.message}`);
     }
-    
-    const cleanedText = text.replace(/\s+/g, ' ').trim();
-    console.log('📄 Legacy DOC processed successfully');
-    return cleanedText;
   }
 
   /**
-   * Extract text from XLSX
+   * Extract text from XLSX documents
    */
   async extractTextFromXLSX(buffer) {
-    if (!this.libraries.xlsx) {
-      throw new Error('XLSX processing library not available');
-    }
+    const xlsx = await this.ensureLibrary('xlsx', true);
     
     try {
-      const workbook = this.libraries.xlsx.read(buffer, { type: 'buffer' });
+      const workbook = xlsx.read(buffer, { type: 'buffer' });
       let fullText = '';
       
       workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
-        const sheetText = this.libraries.xlsx.utils.sheet_to_txt(worksheet);
+        const sheetText = xlsx.utils.sheet_to_txt(worksheet);
         if (sheetText.trim()) {
           fullText += `\n--- Sheet: ${sheetName} ---\n${sheetText}\n`;
         }
@@ -209,26 +278,24 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from legacy XLS
+   * Extract text from legacy XLS documents
    */
   async extractTextFromXLS(buffer) {
-    if (!this.libraries.xlsx) {
-      throw new Error('XLS processing library not available');
-    }
+    const xlsx = await this.ensureLibrary('xlsx', true);
     
     try {
-      const workbook = this.libraries.xlsx.read(buffer, { type: 'buffer' });
+      const workbook = xlsx.read(buffer, { type: 'buffer' });
       let fullText = '';
       
       workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
-        const sheetText = this.libraries.xlsx.utils.sheet_to_txt(worksheet);
+        const sheetText = xlsx.utils.sheet_to_txt(worksheet);
         if (sheetText.trim()) {
           fullText += `\n--- Sheet: ${sheetName} ---\n${sheetText}\n`;
         }
       });
       
-      console.log('📊 Legacy XLS processed successfully');
+      console.log('📊 XLS processed successfully');
       return fullText.trim();
     } catch (error) {
       throw new Error(`XLS processing failed: ${error.message}`);
@@ -236,20 +303,18 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from PPTX
+   * Extract text from PPTX documents
    */
   async extractTextFromPPTX(buffer) {
-    if (!this.libraries.xlsx) {
-      throw new Error('PPTX processing library not available');
-    }
+    const xlsx = await this.ensureLibrary('xlsx', true);
     
     try {
-      const workbook = this.libraries.xlsx.read(buffer, { type: 'buffer' });
+      const workbook = xlsx.read(buffer, { type: 'buffer' });
       let fullText = '';
       
       workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
-        const sheetText = this.libraries.xlsx.utils.sheet_to_txt(worksheet);
+        const sheetText = xlsx.utils.sheet_to_txt(worksheet);
         if (sheetText.trim()) {
           fullText += `\n--- Slide: ${sheetName} ---\n${sheetText}\n`;
         }
@@ -263,371 +328,464 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from CSV
+   * Extract text from CSV documents
    */
   async extractTextFromCSV(buffer) {
-    const text = buffer.toString('utf-8');
-    console.log('📄 CSV processed successfully');
-    return text;
+    try {
+      const text = buffer.toString('utf-8');
+      console.log('📄 CSV processed successfully');
+      return text;
+    } catch (error) {
+      throw new Error(`CSV processing failed: ${error.message}`);
+    }
   }
 
   /**
-   * Extract text from RTF
+   * Extract text from RTF documents
    */
   async extractTextFromRTF(buffer) {
-    const text = buffer.toString('utf-8');
-    // Basic RTF text extraction (remove RTF formatting codes)
-    const cleanedText = text
-      .replace(/\\[a-z]+\d*\s?/g, '') // Remove RTF commands
-      .replace(/[{}]/g, '') // Remove braces
-      .replace(/\s+/g, ' ') // Normalize whitespace
-      .trim();
-    
-    console.log('📄 RTF processed successfully');
-    return cleanedText;
+    try {
+      const text = buffer.toString('utf-8');
+      // Basic RTF text extraction (remove RTF formatting codes)
+      const cleanedText = text
+        .replace(/\\[a-z]+\d*\s?/g, '') // Remove RTF commands
+        .replace(/[{}]/g, '') // Remove braces
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim();
+      
+      console.log('📄 RTF processed successfully');
+      return cleanedText;
+    } catch (error) {
+      throw new Error(`RTF processing failed: ${error.message}`);
+    }
   }
 
   /**
-   * Extract text from image using OCR
+   * Extract text from images using OCR
    */
   async extractTextFromImage(buffer) {
-    if (!this.libraries.tesseract) {
-      throw new Error('OCR processing library not available');
+    const tesseract = await this.ensureLibrary('tesseract', false);
+    
+    if (!tesseract) {
+      throw new Error('OCR processing not available - tesseract.js library not loaded');
     }
     
     try {
-      const { createWorker } = this.libraries.tesseract;
-      const worker = await createWorker('eng', 1);
-      const { data: { text } } = await worker.recognize(buffer);
-      await worker.terminate();
-      
+      const { data: { text } } = await tesseract.recognize(buffer);
       console.log('📄 Image OCR processed successfully');
-      return text;
+      return text.trim();
     } catch (error) {
       throw new Error(`OCR processing failed: ${error.message}`);
     }
   }
 
   /**
-   * Classify document type for adaptive processing
+   * Extract text from plain text files
    */
-  classifyDocumentType(text) {
-    const hasTable = /Name\s+Phone\s+Email|Name\s+Role\s+Contact/i.test(text);
-    const hasSections = /(PRODUCTION|TALENT|CREW|CLIENTS)/i.test(text);
-    const hasNarrative = text.split('\n').length > 20 && !hasTable;
-    
-    if (hasTable) return 'STRUCTURED_TABLE';
-    if (hasSections) return 'SECTIONED';
-    if (hasNarrative) return 'NARRATIVE';
-    return 'GENERIC';
+  async extractTextFromPlainText(buffer) {
+    try {
+      const text = buffer.toString('utf-8');
+      console.log('📄 Plain text processed successfully');
+      return text;
+    } catch (error) {
+      throw new Error(`Plain text processing failed: ${error.message}`);
+    }
   }
 
   /**
-   * Detect production type for context-aware extraction
-   */
-  detectProductionType(text) {
-    const textLower = text.toLowerCase();
-    if (textLower.includes('photo') || textLower.includes('photographer')) return 'PHOTOGRAPHY';
-    if (textLower.includes('video') || textLower.includes('director')) return 'VIDEO';
-    if (textLower.includes('fashion') || textLower.includes('model')) return 'FASHION';
-    if (textLower.includes('commercial') || textLower.includes('advertising')) return 'COMMERCIAL';
-    return 'GENERAL';
-  }
-
-  /**
-   * Build adaptive prompt based on document and production type
-   */
-  buildAdaptivePrompt(text, documentType, productionType, rolePreferences, options) {
-    const baseInstructions = rolePreferences && rolePreferences.length > 0
-      ? `Focus on these specific roles: ${rolePreferences.join(', ')}.`
-      : `Extract ALL people mentioned in the call sheet, including but not limited to: Producer, Creative Director, Photographer, Makeup Artist, Stylist, Client Contact, Art Director, Director, Assistant, Talent, etc.`;
-
-    const documentTypeInstructions = {
-      'STRUCTURED_TABLE': 'This appears to be a structured table format. Pay special attention to rows and columns.',
-      'SECTIONED': 'This document has clear sections. Look for people in each relevant section.',
-      'NARRATIVE': 'This is a narrative format. Look for people mentioned throughout the text.',
-      'GENERIC': 'Extract all people mentioned regardless of format.'
-    };
-
-    const productionTypeInstructions = {
-      'PHOTOGRAPHY': 'Focus on photography-related roles: Photographer, Art Director, Stylist, Makeup Artist, Model, etc.',
-      'VIDEO': 'Focus on video production roles: Director, Producer, Cinematographer, Editor, etc.',
-      'FASHION': 'Focus on fashion industry roles: Stylist, Model, Fashion Director, etc.',
-      'COMMERCIAL': 'Focus on commercial production roles: Client, Agency, Creative Director, etc.',
-      'GENERAL': 'Extract all relevant production roles.'
-    };
-
-    const optionInstructions = (() => {
-      const parts = [];
-      if (options.includePhoneNumbers) parts.push('Include phone numbers when available');
-      if (options.includeEmails) parts.push('Include email addresses when available');
-      if (options.includeAddresses) parts.push('Include addresses when available');
-      if (options.includeSocialMedia) parts.push('Include social media handles when available');
-      return parts.length > 0 ? `Additional requirements: ${parts.join(', ')}.` : '';
-    })();
-
-    return `Extract contact information from this production call sheet:
-
-${baseInstructions}
-${documentTypeInstructions[documentType] || ''}
-${productionTypeInstructions[productionType] || ''}
-${optionInstructions}
-
-Return the results as a JSON array of contact objects. Each contact should have this structure:
-{
-  "name": "Full Name",
-  "role": "Job Title/Role",
-  "phone": "Phone Number (if available)",
-  "email": "Email Address (if available)",
-  "company": "Company/Production (if mentioned)",
-  "notes": "Any additional notes or context"
-}
-
-Call Sheet Content:
-${text}
-
-Extract all relevant contacts and return as a valid JSON array.`;
-  }
-
-  /**
-   * Extract contacts from call sheet text using OpenAI
+   * Extract contacts from processed text using AI with chunking for large documents
+   * @param {string} text - Extracted text from document
+   * @param {Array} rolePreferences - Preferred roles to focus on
+   * @param {Object} options - Extraction options
+   * @param {string} userId - User ID for tracking
+   * @returns {Object} Extraction result with contacts and metadata
    */
   async extractContacts(text, rolePreferences = [], options = {}, userId = null) {
     try {
-      if (!this.openAIApiKey) {
-        throw new Error('OpenAI API key not configured');
-      }
-
-      if (!text || text.trim().length < 10) {
-        throw new Error('Insufficient text content to process');
-      }
-
-      console.log('🔍 Starting enhanced contact extraction...');
-      console.log('📄 Text length:', text.length);
-      console.log('🎭 Role preferences:', rolePreferences);
-
-      // Check usage limits if userId is provided
-      if (userId) {
-        const canProcess = await usageService.canPerformAction(userId, 'ai_processing', 1);
-        if (!canProcess.canPerform) {
-          throw new Error(`Usage limit exceeded: ${canProcess.reason}`);
-        }
-      }
-
-      // Classify document and production type
-      const documentType = this.classifyDocumentType(text);
-      const productionType = this.detectProductionType(text);
+      console.log('🤖 Starting AI contact extraction...');
+      console.log('📊 Role preferences:', rolePreferences);
+      console.log('📊 Options:', options);
       
-      console.log('📋 Document type:', documentType);
-      console.log('🎬 Production type:', productionType);
-
-      // Build adaptive extraction prompt
-      const prompt = this.buildAdaptivePrompt(text, documentType, productionType, rolePreferences, options);
-
-      // Call OpenAI API
-      const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.openAIApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert AI assistant specialized in extracting contact information from production call sheets. Always return ONLY valid JSON in the specified format. Do not wrap the JSON in markdown code blocks or any other formatting. Return pure JSON that can be parsed directly.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 4000
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ OpenAI API error:', response.status, errorText);
-        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      const aiResponse = data.choices[0]?.message?.content;
-
-      if (!aiResponse) {
-        throw new Error('No response from AI service');
-      }
-
-      console.log('🤖 AI Response received (first 500 chars):', aiResponse.substring(0, 500));
-
-      // Parse the JSON response
-      const contacts = this.parseAIResponse(aiResponse);
+      // Analyze document structure and type
+      const documentAnalysis = await this.analyzeDocumentStructure(text);
+      console.log('📋 Document analysis:', documentAnalysis);
       
-      console.log('✅ Extraction completed:', contacts.length, 'contacts found');
+      // Calculate estimated tokens (roughly 4 characters per token)
+      const estimatedTokens = Math.ceil(text.length / 4);
+      console.log(`📊 Estimated tokens: ${estimatedTokens}`);
       
-      // Track usage if userId is provided
-      if (userId) {
-        try {
-          const estimatedTokens = data.usage?.total_tokens || Math.ceil(text.length / 4);
-          const estimatedMinutes = Math.ceil(estimatedTokens / 1000); // Rough estimate: 1000 tokens = 1 minute
+      let contacts = [];
+      let processedChunks = 1;
+      
+      // For very large documents, use chunked processing
+      if (estimatedTokens > 120000) {
+        console.log('📚 Document very large, using chunked processing...');
+        const chunkedResult = await this.processLargeDocumentInChunks(text, userId, rolePreferences, options);
+        contacts = chunkedResult.contacts;
+        processedChunks = chunkedResult.processedChunks;
+      } else {
+        // For moderately large documents, truncate if needed
+        let processedText = text;
+        if (estimatedTokens > 100000) {
+          console.log('✂️ Text too long, truncating to fit context window...');
+          const maxChars = 100000 * 4; // ~100k tokens worth of characters
+          processedText = text.substring(0, maxChars);
           
-          await usageService.incrementUsage(userId, 'ai_processing', estimatedMinutes);
-          await usageService.incrementUsage(userId, 'api_call', 1);
+          // Try to break at a good point (end of line or paragraph)
+          const lastNewline = processedText.lastIndexOf('\n');
+          const lastSpace = processedText.lastIndexOf(' ');
+          const breakPoint = (lastNewline > maxChars * 0.9) ? lastNewline : 
+                            (lastSpace > maxChars * 0.9) ? lastSpace : maxChars;
           
-          console.log('✅ Usage tracked for user:', userId);
-        } catch (usageError) {
-          console.warn('⚠️ Failed to track usage:', usageError.message);
-          // Don't fail the extraction if usage tracking fails
+          processedText = text.substring(0, breakPoint).trim();
+          console.log(`✂️ Truncated to ${processedText.length} characters`);
         }
+        
+        // Process single chunk with enhanced prompt
+        contacts = await this.extractContactsFromChunk(processedText, 1, 1, rolePreferences, options, documentAnalysis);
       }
       
       return {
         success: true,
-        contacts,
-        usage: data.usage
+        contacts: contacts,
+        processedChunks: processedChunks,
+        documentType: documentAnalysis.type,
+        productionType: documentAnalysis.productionType,
+        usage: {
+          tokensProcessed: estimatedTokens,
+          charactersProcessed: text.length
+        }
       };
-
     } catch (error) {
-      console.error('❌ Extraction error:', error);
+      console.error('❌ AI contact extraction error:', error);
       return {
         success: false,
-        error: error.message
+        error: `Contact extraction failed: ${error.message}`,
+        contacts: []
       };
     }
   }
 
   /**
-   * Build extraction prompt based on text and preferences
+   * Analyze document structure to optimize extraction
    */
-  buildExtractionPrompt(text, rolePreferences, options) {
-    const roleFilter = rolePreferences && rolePreferences.length > 0
-      ? `Only include people with these specific roles: ${rolePreferences.join(', ')}.`
-      : `Extract ALL people mentioned in the call sheet, including but not limited to: Producer, Creative Director, Photographer, Makeup Artist, Stylist, Client Contact, Art Director, Director, Assistant, Talent, Catering, Security, Location Manager, etc.`;
+  async analyzeDocumentStructure(text) {
+    const analysis = {
+      type: 'unknown',
+      productionType: 'unknown',
+      hasTableStructure: false,
+      hasContactSections: false,
+      estimatedContacts: 0
+    };
 
-    const optionInstructions = (() => {
-      const parts = [];
-      if (options.includePhoneNumbers) parts.push('Include phone numbers when available');
-      if (options.includeEmails) parts.push('Include email addresses when available');
-      if (options.includeAddresses) parts.push('Include addresses when available');
-      if (options.includeSocialMedia) parts.push('Include social media handles when available');
-      return parts.length > 0 ? `Additional requirements: ${parts.join(', ')}.` : '';
-    })();
-
-    return `Extract contact information from this production call sheet:
-
-${roleFilter}
-${optionInstructions}
-
-Return the results as a JSON array of contact objects. Each contact should have this structure:
-{
-  "name": "Full Name",
-  "role": "Job Title/Role",
-  "phone": "Phone Number (if available)",
-  "email": "Email Address (if available)",
-  "company": "Company/Production (if mentioned)",
-  "notes": "Any additional notes or context"
-}
-
-Call Sheet Content:
-${text}
-
-Extract all relevant contacts and return as a valid JSON array.`;
-  }
-
-  /**
-   * Parse AI response and extract JSON
-   */
-  parseAIResponse(response) {
-    try {
-      // Clean the response - remove markdown code blocks if present
-      let cleanedResponse = response.trim();
-      
-      // Remove markdown code blocks
-      if (cleanedResponse.startsWith('```json')) {
-        cleanedResponse = cleanedResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-      } else if (cleanedResponse.startsWith('```')) {
-        cleanedResponse = cleanedResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
-      }
-
-      // Parse JSON
-      const contacts = JSON.parse(cleanedResponse);
-      
-      // Validate that it's an array
-      if (!Array.isArray(contacts)) {
-        throw new Error('AI response is not an array');
-      }
-
-      // Validate contact structure
-      return contacts.map(contact => ({
-        name: contact.name || 'Unknown',
-        role: contact.role || 'Unknown',
-        phone: contact.phone || '',
-        email: contact.email || '',
-        company: contact.company || '',
-        notes: contact.notes || ''
-      }));
-
-    } catch (error) {
-      console.error('❌ Failed to parse AI response:', error);
-      console.error('❌ Raw response:', response);
-      throw new Error('Failed to parse AI response');
+    // Detect document type
+    if (text.includes('CALL SHEET') || text.includes('Call Sheet')) {
+      analysis.type = 'call_sheet';
+    } else if (text.includes('PRODUCTION') || text.includes('Production')) {
+      analysis.type = 'production_document';
+    } else if (text.includes('CAST') || text.includes('CREW')) {
+      analysis.type = 'cast_crew_list';
+    } else if (text.includes('CONTACTS') || text.includes('Contacts')) {
+      analysis.type = 'contact_list';
     }
+
+    // Detect production type
+    if (text.includes('FILM') || text.includes('MOVIE') || text.includes('Film')) {
+      analysis.productionType = 'film';
+    } else if (text.includes('TV') || text.includes('TELEVISION') || text.includes('SERIES')) {
+      analysis.productionType = 'television';
+    } else if (text.includes('COMMERCIAL') || text.includes('Commercial')) {
+      analysis.productionType = 'commercial';
+    } else if (text.includes('DOCUMENTARY') || text.includes('Documentary')) {
+      analysis.productionType = 'documentary';
+    }
+
+    // Detect table structure
+    const tableIndicators = ['|', '\t', 'Name\t', 'Role\t', 'Email\t', 'Phone\t'];
+    analysis.hasTableStructure = tableIndicators.some(indicator => text.includes(indicator));
+
+    // Detect contact sections
+    const contactSectionIndicators = ['PRODUCTION', 'TALENT', 'CREW', 'CLIENTS', 'CONTACTS', 'CAST'];
+    analysis.hasContactSections = contactSectionIndicators.some(indicator => 
+      text.toUpperCase().includes(indicator)
+    );
+
+    // Estimate number of contacts (rough heuristic)
+    const emailMatches = text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g);
+    analysis.estimatedContacts = emailMatches ? emailMatches.length : 0;
+
+    return analysis;
   }
 
   /**
-   * Process large documents in chunks
+   * Process very large documents in chunks
    */
-  async processLargeDocument(text, rolePreferences = [], options = {}) {
-    const chunkSize = 8000; // Characters per chunk
-    const overlap = 500; // Overlap between chunks
+  async processLargeDocumentInChunks(text, userId, rolePreferences = [], options = {}) {
+    console.log('🔄 Processing very large document in chunks...');
     
+    // Analyze document structure first
+    const documentAnalysis = await this.analyzeDocumentStructure(text);
+    
+    // Split text into chunks of manageable size (~80k tokens each)
+    const chunkSize = 80000 * 4; // ~80k tokens worth of characters
     const chunks = [];
-    for (let i = 0; i < text.length; i += chunkSize - overlap) {
-      chunks.push(text.slice(i, i + chunkSize));
+    
+    for (let i = 0; i < text.length; i += chunkSize) {
+      let chunk = text.substring(i, i + chunkSize);
+      
+      // Try to break at a good point (end of line or paragraph)
+      if (i + chunkSize < text.length) {
+        const lastNewline = chunk.lastIndexOf('\n');
+        const lastSpace = chunk.lastIndexOf(' ');
+        const breakPoint = (lastNewline > chunkSize * 0.8) ? lastNewline : 
+                          (lastSpace > chunkSize * 0.8) ? lastSpace : chunkSize;
+        chunk = chunk.substring(0, breakPoint).trim();
+      }
+      
+      if (chunk.trim()) {
+        chunks.push(chunk);
+      }
     }
-
-    console.log(`📚 Processing large document in ${chunks.length} chunks`);
-
+    
+    console.log(`📚 Split into ${chunks.length} chunks`);
+    
+    // Process each chunk
     const allContacts = [];
     
     for (let i = 0; i < chunks.length; i++) {
-      console.log(`🔄 Processing chunk ${i + 1}/${chunks.length}`);
+      console.log(`🔄 Processing chunk ${i + 1}/${chunks.length}...`);
       
-      const result = await this.extractContacts(chunks[i], rolePreferences, options);
-      
-      if (result.success) {
-        allContacts.push(...result.contacts);
-      } else {
-        console.warn(`⚠️ Chunk ${i + 1} failed:`, result.error);
+      try {
+        const chunkContacts = await this.extractContactsFromChunk(
+          chunks[i], 
+          i + 1, 
+          chunks.length, 
+          rolePreferences, 
+          options, 
+          documentAnalysis
+        );
+        allContacts.push(...chunkContacts);
+        console.log(`✅ Chunk ${i + 1} extracted ${chunkContacts.length} contacts`);
+      } catch (error) {
+        console.warn(`⚠️ Chunk ${i + 1} failed:`, error);
+        
+        // Try to process this chunk with a smaller size as fallback
+        console.log(`🔄 Attempting fallback processing for chunk ${i + 1}...`);
+        try {
+          const smallerChunks = this.splitChunkIntoSmallerPieces(chunks[i]);
+          console.log(`📚 Split chunk ${i + 1} into ${smallerChunks.length} smaller pieces`);
+          
+          for (let j = 0; j < smallerChunks.length; j++) {
+            try {
+              const subChunkContacts = await this.extractContactsFromChunk(
+                smallerChunks[j], 
+                i + 1, 
+                chunks.length, 
+                rolePreferences, 
+                options, 
+                documentAnalysis
+              );
+              allContacts.push(...subChunkContacts);
+              console.log(`✅ Sub-chunk ${j + 1} extracted ${subChunkContacts.length} contacts`);
+            } catch (subError) {
+              console.warn(`⚠️ Sub-chunk ${j + 1} also failed:`, subError);
+            }
+          }
+        } catch (fallbackError) {
+          console.warn(`⚠️ Fallback processing also failed for chunk ${i + 1}:`, fallbackError);
+        }
       }
     }
-
-    // Remove duplicates based on name and role
-    const uniqueContacts = this.removeDuplicateContacts(allContacts);
     
+    // Remove duplicates based on name and email
+    const uniqueContacts = allContacts.filter((contact, index, self) => 
+      index === self.findIndex(c => 
+        c.name === contact.name && c.email === contact.email
+      )
+    );
+    
+    console.log(`🎯 Total unique contacts found: ${uniqueContacts.length}`);
     return {
-      success: true,
       contacts: uniqueContacts,
       processedChunks: chunks.length
     };
   }
 
   /**
-   * Remove duplicate contacts
+   * Split a chunk into smaller pieces for fallback processing
    */
-  removeDuplicateContacts(contacts) {
-    const seen = new Set();
-    return contacts.filter(contact => {
-      const key = `${contact.name.toLowerCase()}-${contact.role.toLowerCase()}`;
-      if (seen.has(key)) {
-        return false;
+  splitChunkIntoSmallerPieces(chunk) {
+    const maxSize = 40000 * 4; // ~40k tokens worth of characters
+    const pieces = [];
+    
+    for (let i = 0; i < chunk.length; i += maxSize) {
+      let piece = chunk.substring(i, i + maxSize);
+      
+      // Try to break at a good point
+      if (i + maxSize < chunk.length) {
+        const lastNewline = piece.lastIndexOf('\n');
+        const lastSpace = piece.lastIndexOf(' ');
+        const breakPoint = (lastNewline > maxSize * 0.8) ? lastNewline : 
+                          (lastSpace > maxSize * 0.8) ? lastSpace : maxSize;
+        piece = piece.substring(0, breakPoint).trim();
       }
-      seen.add(key);
-      return true;
+      
+      if (piece.trim()) {
+        pieces.push(piece);
+      }
+    }
+    
+    return pieces;
+  }
+
+  /**
+   * Extract contacts from a single chunk with adaptive prompts based on document structure
+   */
+  async extractContactsFromChunk(text, chunkNumber, totalChunks, rolePreferences = [], options = {}, documentAnalysis = {}) {
+    // Build adaptive prompt based on document structure
+    const prompt = this.buildAdaptivePrompt(text, chunkNumber, totalChunks, rolePreferences, options, documentAnalysis);
+
+    const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.openAIApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert at extracting contact information from production documents. Always return valid JSON. Be thorough but accurate in identifying all relevant contacts.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 4000
+      })
     });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content;
+    
+    if (!content) {
+      throw new Error('No response from AI service');
+    }
+
+    // Parse the JSON response
+    let contacts;
+    try {
+      contacts = JSON.parse(content);
+    } catch (parseError) {
+      console.error('❌ Failed to parse AI response as JSON:', content);
+      throw new Error('Invalid response format from AI service');
+    }
+
+    if (!Array.isArray(contacts)) {
+      throw new Error('AI response is not an array of contacts');
+    }
+
+    // Validate and clean contacts
+    const validContacts = contacts.filter(contact => {
+      return contact && (
+        (contact.name && contact.name.trim()) ||
+        (contact.role && contact.role.trim())
+      );
+    }).map(contact => ({
+      name: contact.name?.trim() || '',
+      role: contact.role?.trim() || '',
+      department: contact.department?.trim() || '',
+      email: contact.email?.trim() || '',
+      phone: contact.phone?.trim() || '',
+      company: contact.company?.trim() || '',
+      notes: contact.notes?.trim() || ''
+    }));
+
+    return validContacts;
+  }
+
+  /**
+   * Build adaptive prompt based on document structure and user preferences
+   */
+  buildAdaptivePrompt(text, chunkNumber, totalChunks, rolePreferences, options, documentAnalysis) {
+    let prompt = `Extract contact information from this production document text. Return a JSON array of contacts with the following structure:
+[
+  {
+    "name": "Full Name",
+    "role": "Job Title/Role",
+    "department": "Department",
+    "email": "email@example.com",
+    "phone": "phone number",
+    "company": "Company Name",
+    "notes": "Additional notes"
+  }
+]
+
+Only include contacts that have at least a name or role. Be thorough but accurate. If no contacts are found, return an empty array.`;
+
+    // Add document-specific instructions
+    if (documentAnalysis.type === 'call_sheet') {
+      prompt += `\n\nThis appears to be a CALL SHEET. Focus on extracting production crew, cast members, and key personnel. Look for sections like PRODUCTION, TALENT, CREW, etc.`;
+    } else if (documentAnalysis.type === 'cast_crew_list') {
+      prompt += `\n\nThis appears to be a CAST/CREW LIST. Extract all cast members and crew members with their roles and contact information.`;
+    } else if (documentAnalysis.type === 'contact_list') {
+      prompt += `\n\nThis appears to be a CONTACT LIST. Extract all contacts with their roles and contact information.`;
+    } else if (documentAnalysis.type === 'production_document') {
+      prompt += `\n\nThis appears to be a PRODUCTION DOCUMENT. Look for production team members, crew, and key personnel.`;
+    }
+
+    // Add production type specific instructions
+    if (documentAnalysis.productionType === 'film') {
+      prompt += `\n\nThis is a FILM production. Look for film-specific roles like Director, Producer, Cinematographer, etc.`;
+    } else if (documentAnalysis.productionType === 'television') {
+      prompt += `\n\nThis is a TELEVISION production. Look for TV-specific roles like Showrunner, Executive Producer, etc.`;
+    } else if (documentAnalysis.productionType === 'commercial') {
+      prompt += `\n\nThis is a COMMERCIAL production. Look for commercial-specific roles like Creative Director, Account Manager, etc.`;
+    }
+
+    // Add role preferences if specified
+    if (rolePreferences && rolePreferences.length > 0) {
+      prompt += `\n\nPRIORITY ROLES: Focus especially on contacts with these roles: ${rolePreferences.join(', ')}.`;
+    }
+
+    // Add table structure instructions
+    if (documentAnalysis.hasTableStructure) {
+      prompt += `\n\nThis document appears to have a table structure. Look for tabular data with columns for names, roles, emails, phones, etc.`;
+    }
+
+    // Add chunk information
+    if (totalChunks > 1) {
+      prompt += `\n\nThis is chunk ${chunkNumber} of ${totalChunks} from a large document. Extract all contacts from this section.`;
+    }
+
+    // Add the actual text
+    prompt += `\n\nDocument text:\n${text}`;
+
+    return prompt;
+  }
+
+  /**
+   * Get service health status
+   */
+  getHealthStatus() {
+    return {
+      initialized: this.isInitialized,
+      libraries: {
+        pdfjs: this.libraries.has('pdfjs'),
+        mammoth: this.libraries.has('mammoth'),
+        xlsx: this.libraries.has('xlsx'),
+        tesseract: this.libraries.has('tesseract')
+      },
+      openai: !!this.openAIApiKey
+    };
   }
 }
 

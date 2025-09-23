@@ -72,7 +72,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     console.log('📁 File size:', req.file.size);
 
     // Process the uploaded file
-    const extractedText = await extractionService.processFile(req.file.path, req.file.mimetype);
+    const fileBuffer = await fs.readFile(req.file.path);
+    const extractedText = await extractionService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
     
     if (!extractedText || extractedText.trim().length < 10) {
       return res.status(400).json({
