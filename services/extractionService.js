@@ -14,6 +14,15 @@ class ExtractionService {
     this.openAIApiKey = process.env.OPENAI_API_KEY;
     this.openAIBaseUrl = 'https://api.openai.com/v1';
     
+    // Debug API key configuration
+    if (!this.openAIApiKey) {
+      console.error('❌ OPENAI_API_KEY environment variable is not set');
+    } else if (!this.openAIApiKey.startsWith('sk-')) {
+      console.warn('⚠️ OPENAI_API_KEY does not start with "sk-" - this might be invalid');
+    } else {
+      console.log('✅ OpenAI API key configured:', this.openAIApiKey.substring(0, 10) + '...');
+    }
+    
     // Library management with proper initialization
     this.libraries = new Map();
     this.initializationPromise = null;
@@ -549,11 +558,18 @@ class ExtractionService {
     
     console.log(`📚 Split into ${chunks.length} chunks`);
     
-    // Process each chunk
+    // Process each chunk sequentially to respect rate limits
     const allContacts = [];
     
     for (let i = 0; i < chunks.length; i++) {
       console.log(`🔄 Processing chunk ${i + 1}/${chunks.length}...`);
+      
+      // Add delay between chunks to respect rate limits
+      if (i > 0) {
+        const delay = 25000; // 25 seconds between chunks (respects 3 RPM limit)
+        console.log(`⏳ Waiting ${delay}ms before processing next chunk...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
       
       try {
         const chunkContacts = await this.extractContactsFromChunk(
@@ -576,6 +592,13 @@ class ExtractionService {
           console.log(`📚 Split chunk ${i + 1} into ${smallerChunks.length} smaller pieces`);
           
           for (let j = 0; j < smallerChunks.length; j++) {
+            // Add delay between sub-chunks too
+            if (j > 0) {
+              const subDelay = 25000;
+              console.log(`⏳ Waiting ${subDelay}ms before processing sub-chunk...`);
+              await new Promise(resolve => setTimeout(resolve, subDelay));
+            }
+            
             try {
               const subChunkContacts = await this.extractContactsFromChunk(
                 smallerChunks[j], 
@@ -645,32 +668,108 @@ class ExtractionService {
     // Build adaptive prompt based on document structure
     const prompt = this.buildAdaptivePrompt(text, chunkNumber, totalChunks, rolePreferences, options, documentAnalysis);
 
-    const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.openAIApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert at extracting contact information from production documents. Always return valid JSON. Be thorough but accurate in identifying all relevant contacts.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.1,
-        max_tokens: 4000
-      })
-    });
+    // Implement rate limiting with retries
+    return await this.callOpenAIWithRetry(prompt, chunkNumber, totalChunks);
+  }
 
+  /**
+   * Call OpenAI API with rate limiting and retries
+   */
+  async callOpenAIWithRetry(prompt, chunkNumber, totalChunks, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 Attempt ${attempt}/${maxRetries} for chunk ${chunkNumber}`);
+        
+        // Add delay between requests to respect rate limits
+        if (attempt > 1) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000); // Exponential backoff, max 30s
+          console.log(`⏳ Waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.openAIApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'gpt-3.5-turbo',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are an expert at extracting contact information from production documents. Always return valid JSON. Be thorough but accurate in identifying all relevant contacts.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            temperature: 0.1,
+            max_tokens: 4000
+          })
+        });
+
+        if (response.status === 429) {
+          // Rate limit hit - extract retry time from response
+          const errorData = await response.json().catch(() => ({}));
+          const retryAfter = this.extractRetryAfter(errorData);
+          
+          if (attempt < maxRetries) {
+            console.log(`⏳ Rate limit hit. Waiting ${retryAfter}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, retryAfter));
+            continue;
+          } else {
+            throw new Error(`Rate limit exceeded after ${maxRetries} attempts. Please try again later.`);
+          }
+        }
+
+        return await this.processOpenAIResponse(response, attempt);
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        console.warn(`⚠️ Attempt ${attempt} failed:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * Extract retry time from rate limit error
+   */
+  extractRetryAfter(errorData) {
+    // Default to 20 seconds if no specific time given
+    if (errorData.error && errorData.error.message) {
+      const match = errorData.error.message.match(/try again in (\d+(?:\.\d+)?)s/);
+      if (match) {
+        return parseFloat(match[1]) * 1000;
+      }
+    }
+    return 20000; // 20 seconds default
+  }
+
+  /**
+   * Process OpenAI API response
+   */
+  async processOpenAIResponse(response, attempt) {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+      console.error('❌ OpenAI API Error Details:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+        apiKeyPrefix: this.openAIApiKey ? this.openAIApiKey.substring(0, 10) + '...' : 'undefined'
+      });
+      
+      if (response.status === 401) {
+        throw new Error(`OpenAI API authentication failed. Please check your API key. Status: ${response.status}`);
+      } else if (response.status === 429) {
+        throw new Error(`OpenAI API rate limit exceeded. Please try again later. Status: ${response.status}`);
+      } else if (response.status === 500) {
+        throw new Error(`OpenAI API server error. Please try again later. Status: ${response.status}`);
+      } else {
+        throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+      }
     }
 
     const data = await response.json();
@@ -709,6 +808,7 @@ class ExtractionService {
       notes: contact.notes?.trim() || ''
     }));
 
+    console.log(`✅ Chunk processed successfully on attempt ${attempt}: ${validContacts.length} contacts`);
     return validContacts;
   }
 
