@@ -432,6 +432,25 @@ class ExtractionService {
         const chunkedResult = await this.processLargeDocumentInChunks(text, userId, rolePreferences, options);
         contacts = chunkedResult.contacts;
         processedChunks = chunkedResult.processedChunks;
+      } else if (estimatedTokens < 2000) {
+        // For very small documents, try simple processing first
+        console.log('📝 Small document, using simple processing...');
+        try {
+          const result = await this.extractContactsFromChunk(text, 1, 1, rolePreferences, options, documentAnalysis);
+          contacts = result.contacts || [];
+          processedChunks = 1;
+        } catch (error) {
+          console.log('⚠️ Simple processing failed, trying fallback extraction...');
+          // Try a simple regex-based fallback for very small documents
+          try {
+            contacts = this.extractContactsWithRegex(text);
+            processedChunks = 1;
+            console.log('✅ Fallback extraction successful');
+          } catch (fallbackError) {
+            console.log('❌ All extraction methods failed');
+            throw error; // Throw the original AI error
+          }
+        }
       } else {
         // For moderately large documents, truncate if needed
         let processedText = text;
@@ -535,8 +554,9 @@ class ExtractionService {
     // Analyze document structure first
     const documentAnalysis = await this.analyzeDocumentStructure(text);
     
-    // Split text into chunks of manageable size (~80k tokens each)
-    const chunkSize = 80000 * 4; // ~80k tokens worth of characters
+    // Split text into chunks optimized for 3 RPM + 60k TPM limits (~40k tokens each)
+    // This ensures we stay well under the 60k TPM limit and can process within 3 RPM
+    const chunkSize = 40000 * 4; // ~40k tokens worth of characters
     const chunks = [];
     
     for (let i = 0; i < text.length; i += chunkSize) {
@@ -686,6 +706,18 @@ class ExtractionService {
           console.log(`⏳ Waiting ${delay}ms before retry...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
+        
+        // For very restrictive rate limits (3 RPM = 20 seconds between requests)
+        if (attempt === 1 && chunkNumber > 1) {
+          console.log(`⏳ Adding 25-second delay for chunk ${chunkNumber} to respect 3 RPM limit...`);
+          await new Promise(resolve => setTimeout(resolve, 25000)); // 25 seconds between chunks
+        }
+        
+        // For the first chunk, add a small delay to respect rate limits
+        if (attempt === 1 && chunkNumber === 1) {
+          console.log(`⏳ Adding 5-second initial delay to respect 3 RPM limit...`);
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5 seconds initial delay
+        }
 
         const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
           method: 'POST',
@@ -713,7 +745,10 @@ class ExtractionService {
         if (response.status === 429) {
           // Rate limit hit - extract retry time from response
           const errorData = await response.json().catch(() => ({}));
+          console.log(`🚫 Rate limit response:`, JSON.stringify(errorData, null, 2));
+          
           const retryAfter = this.extractRetryAfter(errorData);
+          console.log(`⏳ Calculated retry time: ${retryAfter}ms (${retryAfter/1000}s)`);
           
           if (attempt < maxRetries) {
             console.log(`⏳ Rate limit hit. Waiting ${retryAfter}ms before retry...`);
@@ -738,14 +773,60 @@ class ExtractionService {
    * Extract retry time from rate limit error
    */
   extractRetryAfter(errorData) {
-    // Default to 20 seconds if no specific time given
+    // Check for retry-after header first
+    if (errorData.retry_after) {
+      return parseFloat(errorData.retry_after) * 1000;
+    }
+    
+    // Check for retry-after in error message
     if (errorData.error && errorData.error.message) {
       const match = errorData.error.message.match(/try again in (\d+(?:\.\d+)?)s/);
       if (match) {
         return parseFloat(match[1]) * 1000;
       }
+      
+      // Check for "rate limit" without specific time
+      if (errorData.error.message.toLowerCase().includes('rate limit')) {
+        return 60000; // 1 minute for rate limits
+      }
     }
-    return 20000; // 20 seconds default
+    
+    // Default to 25 seconds for 3 RPM rate limits (20s + 5s buffer)
+    return 25000; // 25 seconds default
+  }
+
+  /**
+   * Fallback regex-based contact extraction for very small documents
+   */
+  extractContactsWithRegex(text) {
+    console.log('🔍 Using regex fallback extraction...');
+    
+    const contacts = [];
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    
+    for (const line of lines) {
+      // Look for email patterns
+      const emailMatch = line.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (emailMatch) {
+        const email = emailMatch[1];
+        const name = line.replace(email, '').trim().split(/\s+/)[0];
+        
+        if (name && name.length > 1) {
+          contacts.push({
+            name: name,
+            email: email,
+            role: 'Contact',
+            department: 'Unknown',
+            phone: '',
+            company: '',
+            notes: line.trim()
+          });
+        }
+      }
+    }
+    
+    console.log(`📊 Regex extraction found ${contacts.length} contacts`);
+    return contacts;
   }
 
   /**
