@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { authenticateToken } = require('../middleware/auth');
-const extractionService = require('../services/extractionService');
+const ExtractionService = require('../services/extractionService');
 const customExtractionService = require('../services/customExtractionService');
 const extractionServiceManager = require('../services/extractionServiceManager');
 // Note: secureExtractionService is a TypeScript file and needs to be compiled
@@ -111,6 +111,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     // Extract contacts using the existing service
+    const extractionService = new ExtractionService();
     const uploadExtractedText = await extractionService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
     if (!uploadExtractedText || uploadExtractedText.trim().length < 10) {
       throw new Error('Could not extract text from file or file is too short');
@@ -435,11 +436,12 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
     switch (extractionMethod) {
       case 'ai':
         console.log('🤖 Using AI extraction method');
-        const aiExtractedText = await extractionService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
+        const aiService = new ExtractionService();
+        const aiExtractedText = await aiService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
         if (!aiExtractedText || aiExtractedText.trim().length < 10) {
           throw new Error('Could not extract text from file or file is too short');
         }
-        result = await extractionService.extractContacts(
+        result = await aiService.extractContacts(
           aiExtractedText, 
           parsedRolePreferences, 
           parsedOptions,

@@ -990,4 +990,4 @@ Only include contacts that have at least a name or role. Be thorough but accurat
   }
 }
 
-module.exports = new ExtractionService();
+module.exports = ExtractionService;
