@@ -493,33 +493,36 @@ class StripeService {
    */
   async getAvailablePlans() {
     try {
-      // First try to get from our database
-      const plans = await prismaService.getPlans();
-      if (plans && plans.length > 0) {
-        return plans;
-      }
-
-      // If no plans in database, fetch directly from Stripe
-      console.log('🔄 No plans in database, fetching directly from Stripe...');
+      console.log('🔄 Fetching plans from Stripe...');
       
-      // Fetch all prices from Stripe
+      // Always fetch from Stripe to get actual price IDs
       const prices = await this.stripe.prices.list({
         active: true,
+        expand: ['data.product'],
         limit: 100
       });
 
       console.log(`💰 Found ${prices.data.length} prices in Stripe`);
 
       // Convert Stripe prices to our plan format
-      const stripePlans = prices.data.map(price => ({
-        id: price.id,
-        name: this.getPlanName(price.id, price.unit_amount || 0),
-        price: price.unit_amount || 0,
-        currency: price.currency,
-        interval: price.recurring?.interval || 'month',
-        features: this.getDefaultFeatures(price.unit_amount || 0),
-        popular: this.isPopularPlan(price.unit_amount || 0)
-      }));
+      const stripePlans = prices.data.map(price => {
+        const planId = this.getPlanIdFromPrice(price.id, price.unit_amount || 0);
+        const planName = this.getPlanName(price.id, price.unit_amount || 0);
+        
+        return {
+          id: planId,
+          name: planName,
+          price: price.unit_amount || 0,
+          currency: price.currency,
+          interval: price.recurring?.interval || 'month',
+          stripePriceId: price.id,
+          features: this.getDefaultFeatures(price.unit_amount || 0),
+          popular: this.isPopularPlan(price.unit_amount || 0),
+          uploadsPerMonth: this.getUploadsLimit(planId),
+          maxContacts: this.getContactsLimit(planId),
+          supportLevel: this.getSupportLevel(planId)
+        };
+      });
 
       console.log(`✅ Converted ${stripePlans.length} plans from Stripe`);
       return stripePlans;
@@ -533,6 +536,29 @@ class StripeService {
   }
 
   /**
+   * Get plan ID from price ID and amount
+   */
+  getPlanIdFromPrice(priceId, price) {
+    // Map known Stripe price IDs to plan IDs
+    const priceIdMap = {
+      'price_1S3fHn6NEzYIXIMoL50vVpQr': 'free',
+      'price_1S3fG16NEzYIXIModekCNdYT': 'starter',
+      'price_1S3fJQ6NEzYIXIMorYYqfFpW': 'professional',
+      'price_1S12xbPbpfQlQm4ijVu9T1DJ': 'enterprise'
+    };
+
+    if (priceIdMap[priceId]) {
+      return priceIdMap[priceId];
+    }
+
+    // Fallback to price-based mapping
+    if (price === 0) return 'free';
+    if (price < 3000) return 'starter';
+    if (price < 10000) return 'professional';
+    return 'enterprise';
+  }
+
+  /**
    * Get plan name based on price ID and amount
    */
   getPlanName(priceId, price) {
@@ -540,7 +566,8 @@ class StripeService {
     const priceIdMap = {
       'price_1S3fHn6NEzYIXIMoL50vVpQr': 'Free Trial',
       'price_1S3fG16NEzYIXIModekCNdYT': 'Starter Plan',
-      'price_1S3fJQ6NEzYIXIMorYYqfFpW': 'Professional Plan'
+      'price_1S3fJQ6NEzYIXIMorYYqfFpW': 'Professional Plan',
+      'price_1S12xbPbpfQlQm4ijVu9T1DJ': 'Enterprise Plan'
     };
 
     if (priceIdMap[priceId]) {
@@ -554,6 +581,45 @@ class StripeService {
       return 'Starter Plan';
     } else {
       return 'Professional Plan';
+    }
+  }
+
+  /**
+   * Get uploads limit based on plan ID
+   */
+  getUploadsLimit(planId) {
+    switch (planId) {
+      case 'free': return 1;
+      case 'starter': return 50;
+      case 'professional': return 200;
+      case 'enterprise': return -1; // unlimited
+      default: return 1;
+    }
+  }
+
+  /**
+   * Get contacts limit based on plan ID
+   */
+  getContactsLimit(planId) {
+    switch (planId) {
+      case 'free': return 50;
+      case 'starter': return 500;
+      case 'professional': return -1; // unlimited
+      case 'enterprise': return -1; // unlimited
+      default: return 50;
+    }
+  }
+
+  /**
+   * Get support level based on plan ID
+   */
+  getSupportLevel(planId) {
+    switch (planId) {
+      case 'free': return 'Community';
+      case 'starter': return 'Email';
+      case 'professional': return 'Priority';
+      case 'enterprise': return 'Dedicated';
+      default: return 'Email';
     }
   }
 

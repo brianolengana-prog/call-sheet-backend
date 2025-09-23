@@ -23,11 +23,26 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
 
     if (!priceId) {
       return res.status(400).json({
-        error: {
-          message: 'Price ID is required',
-          type: 'validation_error',
-          status: 400
-        }
+        success: false,
+        error: 'Price ID is required'
+      });
+    }
+
+    // Validate that the price ID exists in Stripe
+    try {
+      const price = await stripe.prices.retrieve(priceId);
+      if (!price.active) {
+        return res.status(400).json({
+          success: false,
+          error: 'Price ID is not active. Please refresh the page and try again.'
+        });
+      }
+      console.log(`✅ Validated price ID: ${priceId} for product: ${price.product}`);
+    } catch (priceError) {
+      console.error('❌ Invalid price ID:', priceId, priceError.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid price ID. Please refresh the page and try again.'
       });
     }
 
@@ -79,6 +94,7 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
     });
 
     res.json({
+      success: true,
       id: session.id,
       url: session.url,
       amount_total: session.amount_total,
@@ -87,13 +103,10 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating checkout session:', error);
+    console.error('❌ Error creating checkout session:', error);
     res.status(500).json({
-      error: {
-        message: 'Failed to create checkout session',
-        type: 'server_error',
-        status: 500
-      }
+      success: false,
+      error: 'Failed to create checkout session'
     });
   }
 });
@@ -467,14 +480,27 @@ router.get('/health', (req, res) => {
  */
 router.get('/plans', async (req, res) => {
   try {
+    console.log('🔄 Fetching plans from Stripe...');
+    
     const prices = await stripe.prices.list({
       active: true,
       expand: ['data.product']
     });
 
+    console.log(`📦 Found ${prices.data.length} prices from Stripe`);
+
     const plans = prices.data.map(price => {
       // Map features based on price ID if metadata is not available
       let features = [];
+      let planId = price.id; // Use price ID as plan ID
+      let uploadsPerMonth = 1;
+      let maxContacts = 50;
+      let aiProcessingMinutes = 0;
+      let storageGB = 1;
+      let apiCallsPerMonth = 100;
+      let supportLevel = 'Email';
+      let isPopular = false;
+      
       if (price.product.metadata?.features) {
         try {
           features = JSON.parse(price.product.metadata.features);
@@ -483,20 +509,38 @@ router.get('/plans', async (req, res) => {
         }
       }
       
-      // If no features in metadata, map based on price ID (updated with correct IDs)
+      // If no features in metadata, map based on price ID
       if (features.length === 0) {
         if (price.id === 'price_1S3fHn6NEzYIXIMoL50vVpQr') {
           // Free plan
+          planId = 'free';
           features = ['1 free upload per month', 'Up to 50 contacts', 'Basic role filtering', 'CSV export'];
+          uploadsPerMonth = 1;
+          maxContacts = 50;
+          supportLevel = 'Email';
         } else if (price.id === 'price_1S12xbPbpfQlQm4ijVu9T1DJ') {
-          // $199/month plan
-          features = ['50 uploads per month', 'Up to 500 contacts', 'Advanced role filtering', 'Priority processing', 'Email support', 'CSV export'];
+          // $199/month plan - Enterprise
+          planId = 'enterprise';
+          features = ['Unlimited uploads', 'Unlimited contacts', 'Advanced role filtering', 'Priority processing', 'Dedicated support', 'Advanced analytics', 'CSV export'];
+          uploadsPerMonth = -1;
+          maxContacts = -1;
+          supportLevel = 'Dedicated';
+          isPopular = true;
         } else if (price.id === 'price_1S3fJQ6NEzYIXIMorYYqfFpW') {
-          // $79.99/month plan
+          // $79.99/month plan - Professional
+          planId = 'professional';
           features = ['200 uploads per month', 'Unlimited contacts', 'Advanced role filtering', 'Priority processing', 'Priority support', 'Advanced analytics', 'CSV export'];
+          uploadsPerMonth = 200;
+          maxContacts = -1;
+          supportLevel = 'Priority';
+          isPopular = true;
         } else if (price.id === 'price_1S3fG16NEzYIXIModekCNdYT') {
-          // $29.99/month plan
+          // $29.99/month plan - Starter
+          planId = 'starter';
           features = ['50 uploads per month', 'Up to 500 contacts', 'Advanced role filtering', 'Priority processing', 'Email support', 'CSV export'];
+          uploadsPerMonth = 50;
+          maxContacts = 500;
+          supportLevel = 'Email';
         } else {
           // Default features for unknown plans
           features = ['Standard features', 'CSV export'];
@@ -504,25 +548,37 @@ router.get('/plans', async (req, res) => {
       }
       
       return {
-        id: price.id,
+        id: planId,
         name: price.product.name,
         price: price.unit_amount,
         currency: price.currency,
-        interval: price.recurring?.interval,
-        features: features
+        interval: price.recurring?.interval || 'month',
+        stripePriceId: price.id,
+        features: features,
+        uploadsPerMonth: uploadsPerMonth,
+        maxContacts: maxContacts,
+        aiProcessingMinutes: aiProcessingMinutes,
+        storageGB: storageGB,
+        apiCallsPerMonth: apiCallsPerMonth,
+        supportLevel: supportLevel,
+        isPopular: isPopular,
+        description: price.product.description || ''
       };
     });
 
-    res.json(plans);
+    console.log(`✅ Returning ${plans.length} plans to frontend`);
+    
+    res.json({
+      success: true,
+      plans: plans
+    });
 
   } catch (error) {
-    console.error('Error getting plans:', error);
+    console.error('❌ Error getting plans:', error);
     res.status(500).json({
-      error: {
-        message: 'Failed to get available plans',
-        type: 'server_error',
-        status: 500
-      }
+      success: false,
+      error: 'Failed to get available plans',
+      plans: []
     });
   }
 });
