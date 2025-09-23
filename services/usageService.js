@@ -180,39 +180,19 @@ class UsageService {
       const usage = await this.getUserUsage(userId);
       const limits = await this.getPlanLimits(planId);
       
+      // Check if user can upload based on their plan and usage
+      const canUpload = usage.uploadsUsed < usage.uploadsLimit;
+      const reason = canUpload ? null : 'You have reached your upload limit for this month';
+      
       return {
+        uploadsUsed: usage.uploadsUsed,
+        uploadsLimit: usage.uploadsLimit,
         planId,
         planName: plan?.name || 'Free Plan',
-        limits,
-        usage: {
-          uploads: {
-            used: usage.uploadsUsed,
-            limit: usage.uploadsLimit,
-            percentage: Math.round((usage.uploadsUsed / usage.uploadsLimit) * 100)
-          },
-          aiMinutes: {
-            used: usage.aiMinutesUsed,
-            limit: usage.aiMinutesLimit,
-            percentage: Math.round((usage.aiMinutesUsed / usage.aiMinutesLimit) * 100)
-          },
-          storage: {
-            used: usage.storageUsedGB,
-            limit: usage.storageLimitGB,
-            percentage: Math.round((usage.storageUsedGB / usage.storageLimitGB) * 100)
-          },
-          apiCalls: {
-            used: usage.apiCallsUsed,
-            limit: limits.apiCallsPerMonth,
-            percentage: Math.round((usage.apiCallsUsed / limits.apiCallsPerMonth) * 100)
-          }
-        },
-        subscription: subscription ? {
-          id: subscription.id,
-          status: subscription.status,
-          currentPeriodStart: subscription.currentPeriodStart,
-          currentPeriodEnd: subscription.currentPeriodEnd,
-          cancelAtPeriodEnd: subscription.cancelAtPeriodEnd
-        } : null
+        canUpload,
+        reason,
+        totalContacts: usage.totalContacts || 0,
+        totalJobs: usage.totalJobs || 0
       };
     } catch (error) {
       console.error('❌ Error getting user plan info:', error);
