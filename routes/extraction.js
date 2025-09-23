@@ -152,14 +152,19 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
         jobId = job.id;
 
-        // Save contacts to database
+        // Save contacts to database (map to schema fields only)
         const contactsToSave = result.contacts.map(contact => ({
-          ...contact,
+          name: contact.name || 'Unknown',
+          email: typeof contact.email === 'string' ? contact.email : null,
+          phone: typeof contact.phone === 'string' ? contact.phone : null,
+          role: contact.role || null,
+          company: contact.company || null,
+          isSelected: true,
           jobId: job.id,
           userId
         }));
 
-        await prismaService.createContacts(contactsToSave);
+        await prismaService.createContactsInChunks(contactsToSave, 500);
 
         // Update usage tracking
         await usageService.incrementUsage(userId, 'upload', 1);
@@ -258,14 +263,19 @@ router.post('/extract', async (req, res) => {
           status: 'COMPLETED'
         });
 
-        // Save contacts to database
+        // Save contacts to database (map to schema fields only)
         const contactsToSave = result.contacts.map(contact => ({
-          ...contact,
+          name: contact.name || 'Unknown',
+          email: typeof contact.email === 'string' ? contact.email : null,
+          phone: typeof contact.phone === 'string' ? contact.phone : null,
+          role: contact.role || null,
+          company: contact.company || null,
+          isSelected: true,
           jobId: job.id,
           userId
         }));
 
-        await prismaService.createContacts(contactsToSave);
+        await prismaService.createContactsInChunks(contactsToSave, 500);
 
         // Update usage tracking
         await prismaService.incrementUsage(userId, {
