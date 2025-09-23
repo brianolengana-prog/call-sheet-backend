@@ -436,13 +436,22 @@ class PrismaService {
    * Create job
    */
   async createJob(jobData) {
+    // Ensure a Profile exists for the provided userId to satisfy FK constraint
+    if (jobData && jobData.userId) {
+      await this.prisma.profile.upsert({
+        where: { userId: jobData.userId },
+        update: {},
+        create: {
+          userId: jobData.userId,
+          // minimal required fields; add sensible defaults if your schema requires more
+          avatarUrl: null,
+          phone: null
+        }
+      });
+    }
+
     return await this.prisma.job.create({
-      data: jobData,
-      include: {
-        contacts: true,
-        profile: true,
-        production: true
-      }
+      data: jobData
     });
   }
 
@@ -452,11 +461,7 @@ class PrismaService {
   async getJobById(id) {
     return await this.prisma.job.findUnique({
       where: { id },
-      include: {
-        contacts: true,
-        profile: true,
-        production: true
-      }
+      include: { contacts: true, profile: true, production: true }
     });
   }
 
@@ -482,12 +487,22 @@ class PrismaService {
     return await this.prisma.job.update({
       where: { id },
       data,
-      include: {
-        contacts: true,
-        profile: true,
-        production: true
-      }
+      include: { contacts: true, profile: true, production: true }
     });
+  }
+
+  /**
+   * Create contacts in chunks to avoid parameter limits
+   */
+  async createContactsInChunks(contactsData, chunkSize = 500) {
+    if (!Array.isArray(contactsData) || contactsData.length === 0) return { count: 0 };
+    let total = 0;
+    for (let i = 0; i < contactsData.length; i += chunkSize) {
+      const chunk = contactsData.slice(i, i + chunkSize);
+      const res = await this.prisma.contact.createMany({ data: chunk });
+      total += res.count || chunk.length;
+    }
+    return { count: total };
   }
 
   /**
