@@ -439,8 +439,9 @@ class PrismaService {
     return await this.prisma.job.create({
       data: jobData,
       include: {
-        user: true,
-        contacts: true
+        contacts: true,
+        profile: true,
+        production: true
       }
     });
   }
@@ -452,8 +453,9 @@ class PrismaService {
     return await this.prisma.job.findUnique({
       where: { id },
       include: {
-        user: true,
-        contacts: true
+        contacts: true,
+        profile: true,
+        production: true
       }
     });
   }
@@ -481,8 +483,9 @@ class PrismaService {
       where: { id },
       data,
       include: {
-        user: true,
-        contacts: true
+        contacts: true,
+        profile: true,
+        production: true
       }
     });
   }

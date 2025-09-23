@@ -145,7 +145,7 @@ class QueueService {
         userId,
         title: `File Upload - ${fileName}`,
         fileName,
-        status: 'completed'
+        status: 'COMPLETED'
       });
 
       // Save contacts

@@ -255,7 +255,7 @@ router.post('/extract', async (req, res) => {
         const job = await prismaService.createJob({
           userId,
           title: `Call Sheet Extraction - ${new Date().toLocaleDateString()}`,
-          status: 'completed'
+          status: 'COMPLETED'
         });
 
         // Save contacts to database
