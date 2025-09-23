@@ -9,7 +9,14 @@ const path = require('path');
 const fs = require('fs').promises;
 const { authenticateToken } = require('../middleware/auth');
 const ExtractionService = require('../services/extractionService');
-const customExtractionService = require('../services/customExtractionService');
+let customExtractionService;
+try {
+  customExtractionService = require('../services/customExtractionService');
+  console.log('✅ Custom extraction service loaded successfully');
+} catch (error) {
+  console.warn('⚠️ Custom extraction service not available:', error.message);
+  customExtractionService = null;
+}
 const extractionServiceManager = require('../services/extractionServiceManager');
 // Note: secureExtractionService is a TypeScript file and needs to be compiled
 // For now, we'll use the existing services directly
@@ -451,23 +458,71 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
 
       case 'custom':
         console.log('🔧 Using custom extraction method');
-        result = await customExtractionService.extractContacts(
-          fileBuffer,
-          req.file.mimetype,
-          req.file.originalname,
-          { ...parsedOptions, rolePreferences: parsedRolePreferences, userId }
-        );
+        if (!customExtractionService) {
+          console.warn('⚠️ Custom extraction service not available, falling back to AI');
+          // Fallback to AI extraction
+          const customFallbackService = new ExtractionService();
+          const customExtractedText = await customFallbackService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
+          if (!customExtractedText || customExtractedText.trim().length < 10) {
+            throw new Error('Could not extract text from file or file is too short');
+          }
+          result = await customFallbackService.extractContacts(
+            customExtractedText, 
+            parsedRolePreferences, 
+            parsedOptions,
+            userId
+          );
+        } else {
+          try {
+            result = await customExtractionService.extractContacts(
+              fileBuffer,
+              req.file.mimetype,
+              req.file.originalname,
+              { ...parsedOptions, rolePreferences: parsedRolePreferences, userId }
+            );
+          } catch (customError) {
+            console.warn('⚠️ Custom extraction failed, falling back to AI:', customError.message);
+            // Fallback to AI extraction
+            const customFallbackService = new ExtractionService();
+            const customExtractedText = await customFallbackService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
+            if (!customExtractedText || customExtractedText.trim().length < 10) {
+              throw new Error('Could not extract text from file or file is too short');
+            }
+            result = await customFallbackService.extractContacts(
+              customExtractedText, 
+              parsedRolePreferences, 
+              parsedOptions,
+              userId
+            );
+          }
+        }
         break;
 
       case 'auto':
       default:
         console.log('🎯 Using intelligent extraction method selection');
-        result = await extractionServiceManager.extractContacts(
-          fileBuffer,
-          req.file.mimetype,
-          req.file.originalname,
-          { ...parsedOptions, rolePreferences: parsedRolePreferences, userId }
-        );
+        try {
+          result = await extractionServiceManager.extractContacts(
+            fileBuffer,
+            req.file.mimetype,
+            req.file.originalname,
+            { ...parsedOptions, rolePreferences: parsedRolePreferences, userId }
+          );
+        } catch (managerError) {
+          console.warn('⚠️ Extraction manager failed, falling back to AI:', managerError.message);
+          // Fallback to AI extraction
+          const autoFallbackService = new ExtractionService();
+          const autoExtractedText = await autoFallbackService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
+          if (!autoExtractedText || autoExtractedText.trim().length < 10) {
+            throw new Error('Could not extract text from file or file is too short');
+          }
+          result = await autoFallbackService.extractContacts(
+            autoExtractedText, 
+            parsedRolePreferences, 
+            parsedOptions,
+            userId
+          );
+        }
         break;
     }
 
@@ -559,15 +614,21 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
  */
 router.get('/methods', (req, res) => {
   try {
-    const manager = new extractionServiceManager();
-    const serviceStatus = manager.getServiceStatus();
+    // Check service availability
+    const aiAvailable = !!process.env.OPENAI_API_KEY;
+    const customAvailable = !!customExtractionService;
+    
+    console.log('🔍 Service availability check:', {
+      ai: aiAvailable,
+      custom: customAvailable
+    });
     
     const methods = {
       ai: {
         name: 'AI Extraction',
         description: 'OpenAI-powered extraction with advanced context understanding',
-        available: serviceStatus.aiService.available,
-        capabilities: serviceStatus.aiService.capabilities,
+        available: aiAvailable,
+        capabilities: aiAvailable ? ['Context understanding', 'High accuracy', 'Complex layouts'] : [],
         bestFor: ['Large documents', 'Complex layouts', 'Context-heavy content'],
         processingTime: '5-60 seconds',
         accuracy: '90-95%'
@@ -575,8 +636,8 @@ router.get('/methods', (req, res) => {
       custom: {
         name: 'Custom Extraction',
         description: 'Pattern-based extraction optimized for production documents',
-        available: serviceStatus.customService.available,
-        capabilities: serviceStatus.customService.capabilities,
+        available: customAvailable,
+        capabilities: customAvailable ? ['Fast processing', 'No API limits', 'OCR support'] : [],
         bestFor: ['Call sheets', 'Contact lists', 'Production documents'],
         processingTime: '1-10 seconds',
         accuracy: '85-95%'
@@ -584,7 +645,7 @@ router.get('/methods', (req, res) => {
       auto: {
         name: 'Intelligent Selection',
         description: 'Automatically chooses the best method based on document characteristics',
-        available: serviceStatus.aiService.available || serviceStatus.customService.available,
+        available: aiAvailable || customAvailable,
         capabilities: ['Best of both worlds', 'Automatic optimization', 'Fallback handling'],
         bestFor: ['Any document type', 'Optimal performance', 'Reliability'],
         processingTime: '1-60 seconds',
@@ -592,10 +653,20 @@ router.get('/methods', (req, res) => {
       }
     };
 
+    // Determine recommended method
+    let recommended = 'auto';
+    if (!aiAvailable && !customAvailable) {
+      recommended = 'ai'; // Fallback to AI even if not available
+    } else if (aiAvailable && !customAvailable) {
+      recommended = 'ai';
+    } else if (!aiAvailable && customAvailable) {
+      recommended = 'custom';
+    }
+
     res.json({
       success: true,
       methods: methods,
-      recommended: serviceStatus.aiService.available ? 'auto' : 'custom'
+      recommended: recommended
     });
 
   } catch (error) {
