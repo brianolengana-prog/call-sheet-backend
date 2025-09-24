@@ -538,13 +538,32 @@ router.get('/stats',
       const stats = optimizedService.getStats();
       const queueStats = await optimizedService.getQueueStats();
       
+      // Safely extract metrics with fallbacks
+      const monitoringMetrics = stats.monitoring || {};
+      const processingMetrics = stats.processing || {};
+      const cacheMetrics = stats.cache || {};
+      
       res.json({
         success: true,
-        stats: {
-          ...stats,
-          queues: queueStats
+        timestamp: new Date().toISOString(),
+        processing: {
+          totalJobs: processingMetrics.totalJobs || 0,
+          completedJobs: processingMetrics.completedJobs || 0,
+          failedJobs: processingMetrics.failedJobs || 0,
+          activeJobs: processingMetrics.activeJobs || 0,
+          averageProcessingTime: processingMetrics.averageProcessingTime || 0
         },
-        timestamp: new Date().toISOString()
+        cache: {
+          hits: cacheMetrics.hits || 0,
+          misses: cacheMetrics.misses || 0,
+          totalRequests: cacheMetrics.totalRequests || 0
+        },
+        queues: queueStats,
+        system: {
+          cpuUsage: monitoringMetrics.system?.cpuUsage || 0,
+          memoryUsage: monitoringMetrics.system?.memoryUsage || 0,
+          uptime: monitoringMetrics.system?.uptime || 0
+        }
       });
 
     } catch (error) {
