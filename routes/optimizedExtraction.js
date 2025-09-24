@@ -58,7 +58,6 @@ router.post('/upload',
       return authenticateToken(req, res, next);
     }
   },
-  requireAPIKeyPermission('extract'),
   upload.single('file'),
   async (req, res) => {
     try {
@@ -212,7 +211,6 @@ router.post('/sync-upload',
       return authenticateToken(req, res, next);
     }
   },
-  requireAPIKeyPermission('extract'),
   upload.single('file'),
   async (req, res) => {
     try {
@@ -350,7 +348,6 @@ router.post('/batch',
       return authenticateToken(req, res, next);
     }
   },
-  requireAPIKeyPermission('extract'),
   upload.array('files', 10), // Max 10 files
   async (req, res) => {
     try {
