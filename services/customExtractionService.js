@@ -177,7 +177,12 @@ class CustomExtractionService {
    */
   async extractTextFromPDF(fileBuffer) {
     try {
-      const pdf = await this.pdfjs.getDocument({ data: fileBuffer }).promise;
+      // Ensure pdfjs receives Uint8Array (not Node Buffer)
+      const data = fileBuffer instanceof Uint8Array
+        ? fileBuffer
+        : new Uint8Array(fileBuffer.buffer ? fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength) : fileBuffer);
+
+      const pdf = await this.pdfjs.getDocument({ data }).promise;
       let fullText = '';
 
       for (let i = 1; i <= pdf.numPages; i++) {
