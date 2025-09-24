@@ -182,6 +182,7 @@ class OptimizedAIExtractionService {
     const startTime = Date.now();
     
     try {
+      const aiDisabled = String(process.env.DISABLE_AI).toLowerCase() === 'true';
       const isSpreadsheet = (
         mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
         mimeType === 'application/vnd.ms-excel' ||
@@ -194,7 +195,8 @@ class OptimizedAIExtractionService {
         mimeType?.startsWith('image/')
       );
 
-      const useCustomFirst = Boolean(options?.forceCustom) || isSpreadsheet || isImage;
+      // When AI is disabled, always use custom-first (and custom-only)
+      const useCustomFirst = aiDisabled || Boolean(options?.forceCustom) || isSpreadsheet || isImage;
 
       let result;
       if (useCustomFirst) {
@@ -209,8 +211,8 @@ class OptimizedAIExtractionService {
           console.warn('⚠️ Custom-first extraction failed:', e.message);
         }
 
-        // If custom produced nothing and not explicitly forced custom-only, try AI next
-        if ((!result || !result.contacts || result.contacts.length === 0) && !options?.customOnly) {
+        // If custom produced nothing and AI is enabled, try AI next (unless explicitly customOnly)
+        if ((!result || !result.contacts || result.contacts.length === 0) && !options?.customOnly && !aiDisabled) {
           result = await this.aiService.extractContacts(
             fileBuffer,
             mimeType,
@@ -219,13 +221,19 @@ class OptimizedAIExtractionService {
           );
         }
       } else {
-        // Use the enhanced AI service for processing first
-        result = await this.aiService.extractContacts(
-          fileBuffer,
-          mimeType,
-          fileName,
-          options
-        );
+        // AI-first path only when AI is enabled; otherwise fall back to custom
+        if (!aiDisabled) {
+          result = await this.aiService.extractContacts(
+            fileBuffer,
+            mimeType,
+            fileName,
+            options
+          );
+        } else {
+          const CustomExtractionService = require('./customExtractionService');
+          const customService = new CustomExtractionService();
+          result = await customService.extractContacts(fileBuffer, mimeType, fileName, options);
+        }
       }
       
       // Fallback: if AI returns 0 contacts or analyzer reports tabular data, try custom extractor
