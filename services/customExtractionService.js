@@ -158,9 +158,14 @@ class CustomExtractionService {
           return await this.extractTextFromXLS(fileBuffer);
         case 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
           return await this.extractTextFromPPTX(fileBuffer);
+        case 'text/csv':
+        case 'application/csv':
+          // Treat CSV as UTF-8 text for pattern extraction
+          return fileBuffer.toString('utf8');
         case 'image/jpeg':
         case 'image/png':
         case 'image/tiff':
+        case 'image/bmp':
           return await this.extractTextFromImage(fileBuffer);
         default:
           // Try to extract as plain text
