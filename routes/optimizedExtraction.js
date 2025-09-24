@@ -313,8 +313,7 @@ router.post('/sync-upload',
             userId,
             title: 'Optimized Extraction',
             fileName: req.file.originalname,
-            status: 'COMPLETED',
-            totalContacts: Array.isArray(result.contacts) ? result.contacts.length : 0
+            status: 'COMPLETED'
           });
           jobId = job?.id || null;
 
