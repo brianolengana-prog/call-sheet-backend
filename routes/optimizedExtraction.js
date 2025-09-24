@@ -543,6 +543,11 @@ router.get('/stats',
       const processingMetrics = stats.processing || {};
       const cacheMetrics = stats.cache || {};
       
+      // Extract AI and API metrics safely
+      const aiMetrics = monitoringMetrics.ai || {};
+      const apiMetrics = monitoringMetrics.api || {};
+      const systemMetrics = monitoringMetrics.system || {};
+      
       res.json({
         success: true,
         timestamp: new Date().toISOString(),
@@ -558,11 +563,23 @@ router.get('/stats',
           misses: cacheMetrics.misses || 0,
           totalRequests: cacheMetrics.totalRequests || 0
         },
+        ai: {
+          totalRequests: aiMetrics.totalRequests || 0,
+          successfulRequests: aiMetrics.successfulRequests || 0,
+          failedRequests: aiMetrics.failedRequests || 0,
+          averageProcessingTime: aiMetrics.averageProcessingTime || 0
+        },
+        api: {
+          totalRequests: apiMetrics.totalRequests || 0,
+          successfulRequests: apiMetrics.successfulRequests || 0,
+          failedRequests: apiMetrics.failedRequests || 0,
+          averageResponseTime: apiMetrics.averageResponseTime || 0
+        },
         queues: queueStats,
         system: {
-          cpuUsage: monitoringMetrics.system?.cpuUsage || 0,
-          memoryUsage: monitoringMetrics.system?.memoryUsage || 0,
-          uptime: monitoringMetrics.system?.uptime || 0
+          cpuUsage: systemMetrics.cpuUsage || 0,
+          memoryUsage: systemMetrics.memoryUsage || 0,
+          uptime: systemMetrics.uptime || 0
         }
       });
 
