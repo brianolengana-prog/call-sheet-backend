@@ -14,6 +14,7 @@ const { customExtractionUploadSchema } = require('../schemas/validation');
 const { logExtractionEvent, logAPIKeyUsage } = require('../middleware/logging');
 const antivirusService = require('../services/antivirusService');
 const OptimizedAIExtractionService = require('../services/optimizedAIExtractionService');
+const prismaService = require('../services/prismaService');
 
 const router = express.Router();
 const routeCors = cors({
@@ -305,6 +306,35 @@ router.post('/sync-upload',
       await require('fs').promises.unlink(req.file.path);
 
       if (result.success) {
+        // Persist job and contacts so Contacts page can display results
+        let jobId = null;
+        try {
+          const job = await prismaService.createJob({
+            userId,
+            title: 'Optimized Extraction',
+            fileName: req.file.originalname,
+            status: 'completed',
+            totalContacts: Array.isArray(result.contacts) ? result.contacts.length : 0
+          });
+          jobId = job?.id || null;
+
+          const contactsToCreate = (Array.isArray(result.contacts) ? result.contacts : []).map((c) => ({
+            jobId,
+            userId,
+            name: c?.name || 'Unknown',
+            email: typeof c?.email === 'string' ? c.email : null,
+            phone: typeof c?.phone === 'string' ? c.phone : null,
+            role: c?.role || null,
+            company: c?.company || null,
+            isSelected: false
+          }));
+          if (contactsToCreate.length > 0 && jobId) {
+            await prismaService.createContactsInChunks(contactsToCreate, 500);
+          }
+        } catch (persistError) {
+          console.warn('⚠️ Failed to persist contacts/job:', persistError.message);
+        }
+
         logExtractionEvent(req, 'sync_optimized_extraction_success', {
           contactsFound: result.contacts.length,
           processingTime: result.processingTime,
@@ -328,6 +358,7 @@ router.post('/sync-upload',
           usage: result.usage,
           processingTime: result.processingTime,
           cached: result.cached,
+          jobId: jobId,
           timestamp: result.timestamp
         });
       } else {
