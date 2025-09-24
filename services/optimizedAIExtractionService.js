@@ -182,14 +182,78 @@ class OptimizedAIExtractionService {
     const startTime = Date.now();
     
     try {
-      // Use the enhanced AI service for processing
-      const result = await this.aiService.extractContacts(
-        fileBuffer,
-        mimeType,
-        fileName,
-        options
+      const isSpreadsheet = (
+        mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        mimeType === 'application/vnd.ms-excel' ||
+        mimeType?.includes('spreadsheet') ||
+        fileName?.toLowerCase().endsWith('.xlsx') ||
+        fileName?.toLowerCase().endsWith('.xls') ||
+        fileName?.toLowerCase().endsWith('.csv')
       );
+      const isImage = (
+        mimeType?.startsWith('image/')
+      );
+
+      const useCustomFirst = Boolean(options?.forceCustom) || isSpreadsheet || isImage;
+
+      let result;
+      if (useCustomFirst) {
+        try {
+          const CustomExtractionService = require('./customExtractionService');
+          const customService = new CustomExtractionService();
+          const customResult = await customService.extractContactsFromBuffer(fileBuffer, fileName, mimeType, options);
+          if (customResult && Array.isArray(customResult.contacts) && customResult.contacts.length > 0) {
+            result = { ...customResult, metadata: { ...(customResult.metadata || {}), primary: 'custom' } };
+          }
+        } catch (e) {
+          console.warn('⚠️ Custom-first extraction failed:', e.message);
+        }
+
+        // If custom produced nothing and not explicitly forced custom-only, try AI next
+        if ((!result || !result.contacts || result.contacts.length === 0) && !options?.customOnly) {
+          result = await this.aiService.extractContacts(
+            fileBuffer,
+            mimeType,
+            fileName,
+            options
+          );
+        }
+      } else {
+        // Use the enhanced AI service for processing first
+        result = await this.aiService.extractContacts(
+          fileBuffer,
+          mimeType,
+          fileName,
+          options
+        );
+      }
       
+      // Fallback: if AI returns 0 contacts or analyzer reports tabular data, try custom extractor
+      const shouldFallbackToCustom = (
+        !result?.contacts || result.contacts.length === 0 ||
+        result?.metadata?.documentStructure === 'tabular' ||
+        mimeType?.includes('spreadsheet') ||
+        mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+
+      let finalResult = result;
+      if (shouldFallbackToCustom) {
+        try {
+          // Lazy-require to avoid loading cost unless needed
+          const CustomExtractionService = require('./customExtractionService');
+          const customService = new CustomExtractionService();
+          const customResult = await customService.extractContactsFromBuffer(fileBuffer, fileName, mimeType, options);
+          if (customResult && Array.isArray(customResult.contacts) && customResult.contacts.length > 0) {
+            finalResult = {
+              ...customResult,
+              metadata: { ...(customResult.metadata || {}), fallbackUsed: 'custom' }
+            };
+          }
+        } catch (fallbackError) {
+          console.warn('⚠️ Custom fallback extraction failed:', fallbackError.message);
+        }
+      }
+
       const processingTime = Date.now() - startTime;
       
       // Update statistics
@@ -204,10 +268,10 @@ class OptimizedAIExtractionService {
       });
       
       // Cache the result
-      await this.cacheService.cacheCompleteExtraction(fileBuffer, mimeType, options, result);
+      await this.cacheService.cacheCompleteExtraction(fileBuffer, mimeType, options, finalResult);
       
       return {
-        ...result,
+        ...finalResult,
         processingTime,
         cached: false,
         timestamp: new Date().toISOString()

@@ -255,7 +255,8 @@ router.post('/sync-upload',
         fileName: req.file.originalname,
         fileType: req.file.mimetype,
         fileSize: req.file.size,
-        userId: userId
+        userId: userId,
+        strategy: options?.forceCustom ? 'custom_first' : 'smart'
       });
 
       // Antivirus scanning
@@ -276,7 +277,7 @@ router.post('/sync-upload',
       // Read file into buffer
       const fileBuffer = await require('fs').promises.readFile(req.file.path);
 
-      // Process with optimized service (synchronous)
+      // Process with optimized service (synchronous) - honors forceCustom/custom-first routing
       const result = await optimizedService.extractContacts(
         fileBuffer,
         req.file.mimetype,
