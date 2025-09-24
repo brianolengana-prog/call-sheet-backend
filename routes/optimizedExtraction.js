@@ -14,6 +14,7 @@ const { customExtractionUploadSchema } = require('../schemas/validation');
 const { logExtractionEvent, logAPIKeyUsage } = require('../middleware/logging');
 const antivirusService = require('../services/antivirusService');
 const OptimizedAIExtractionService = require('../services/optimizedAIExtractionService');
+const usageService = require('../services/usageService');
 const prismaService = require('../services/prismaService');
 
 const router = express.Router();
@@ -72,6 +73,33 @@ router.post('/upload',
   async (req, res) => {
     try {
       const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+
+      // Usage pre-check for free tier limits
+      try {
+        const permission = await usageService.canPerformAction(userId, 'upload', 1);
+        if (!permission.canPerform) {
+          await require('fs').promises.unlink(req.file.path).catch(() => {});
+          return res.status(402).json({ success: false, error: permission.reason || 'Upload limit reached' });
+        }
+      } catch (permErr) {
+        console.warn('⚠️ Usage pre-check failed (sync):', permErr.message);
+      }
+
+      // Enforce usage limits before spending resources
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+      try {
+        const permission = await usageService.canPerformAction(userId, 'upload', 1);
+        if (!permission.canPerform) {
+          return res.status(402).json({ success: false, error: permission.reason || 'Upload limit reached' });
+        }
+      } catch (permErr) {
+        console.warn('⚠️ Usage pre-check failed:', permErr.message);
+      }
 
       if (!req.file) {
         return res.status(400).json({
@@ -161,6 +189,13 @@ router.post('/upload',
       await require('fs').promises.unlink(req.file.path);
 
       if (result.success) {
+        // Increment usage counters
+        try {
+          await usageService.incrementUsage(userId, 'upload', 1);
+          await usageService.incrementUsage(userId, 'api_call', 1);
+        } catch (uErr) {
+          console.warn('⚠️ Failed to increment usage (sync route):', uErr.message);
+        }
         logExtractionEvent(req, 'optimized_extraction_queued', {
           jobId: result.jobId,
           estimatedWaitTime: result.estimatedWaitTime,
