@@ -181,6 +181,17 @@ class CacheService {
    */
   async get(namespace, key, params = {}) {
     try {
+      // Initialize cacheStats if undefined
+      if (!this.cacheStats) {
+        this.cacheStats = {
+          hits: 0,
+          misses: 0,
+          sets: 0,
+          deletes: 0,
+          totalRequests: 0
+        };
+      }
+      
       this.cacheStats.totalRequests++;
       
       if (!this.redis || !this.redisConnected) {
@@ -200,7 +211,9 @@ class CacheService {
       }
     } catch (error) {
       console.error('❌ Cache get error:', error);
-      this.cacheStats.misses++;
+      if (this.cacheStats) {
+        this.cacheStats.misses++;
+      }
       return null;
     }
   }
@@ -216,6 +229,17 @@ class CacheService {
    */
   async set(namespace, key, value, params = {}, ttl = null) {
     try {
+      // Initialize cacheStats if undefined
+      if (!this.cacheStats) {
+        this.cacheStats = {
+          hits: 0,
+          misses: 0,
+          sets: 0,
+          deletes: 0,
+          totalRequests: 0
+        };
+      }
+      
       this.cacheStats.sets++;
       
       if (!this.redis || !this.redisConnected) {
@@ -242,6 +266,17 @@ class CacheService {
    */
   async delete(namespace, key, params = {}) {
     try {
+      // Initialize cacheStats if undefined
+      if (!this.cacheStats) {
+        this.cacheStats = {
+          hits: 0,
+          misses: 0,
+          sets: 0,
+          deletes: 0,
+          totalRequests: 0
+        };
+      }
+      
       this.cacheStats.deletes++;
       
       const cacheKey = this.generateKey(namespace, key, params);

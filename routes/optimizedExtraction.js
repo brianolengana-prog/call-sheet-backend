@@ -573,34 +573,34 @@ router.get('/stats',
         success: true,
         timestamp: new Date().toISOString(),
         processing: {
-          totalJobs: processingMetrics.totalJobs || 0,
-          completedJobs: processingMetrics.completedJobs || 0,
-          failedJobs: processingMetrics.failedJobs || 0,
-          activeJobs: processingMetrics.activeJobs || 0,
-          averageProcessingTime: processingMetrics.averageProcessingTime || 0
+          totalJobs: (processingMetrics && processingMetrics.totalJobs) || 0,
+          completedJobs: (processingMetrics && processingMetrics.completedJobs) || 0,
+          failedJobs: (processingMetrics && processingMetrics.failedJobs) || 0,
+          activeJobs: (processingMetrics && processingMetrics.activeJobs) || 0,
+          averageProcessingTime: (processingMetrics && processingMetrics.averageProcessingTime) || 0
         },
         cache: {
-          hits: cacheMetrics.hits || 0,
-          misses: cacheMetrics.misses || 0,
-          totalRequests: cacheMetrics.totalRequests || 0
+          hits: (cacheMetrics && cacheMetrics.hits) || 0,
+          misses: (cacheMetrics && cacheMetrics.misses) || 0,
+          totalRequests: (cacheMetrics && cacheMetrics.totalRequests) || 0
         },
         ai: {
-          totalRequests: aiMetrics.totalRequests || 0,
-          successfulRequests: aiMetrics.successfulRequests || 0,
-          failedRequests: aiMetrics.failedRequests || 0,
-          averageProcessingTime: aiMetrics.averageProcessingTime || 0
+          totalRequests: (aiMetrics && aiMetrics.totalRequests) || 0,
+          successfulRequests: (aiMetrics && aiMetrics.successfulRequests) || 0,
+          failedRequests: (aiMetrics && aiMetrics.failedRequests) || 0,
+          averageProcessingTime: (aiMetrics && aiMetrics.averageProcessingTime) || 0
         },
         api: {
-          totalRequests: apiMetrics.totalRequests || 0,
-          successfulRequests: apiMetrics.successfulRequests || 0,
-          failedRequests: apiMetrics.failedRequests || 0,
-          averageResponseTime: apiMetrics.averageResponseTime || 0
+          totalRequests: (apiMetrics && apiMetrics.totalRequests) || 0,
+          successfulRequests: (apiMetrics && apiMetrics.successfulRequests) || 0,
+          failedRequests: (apiMetrics && apiMetrics.failedRequests) || 0,
+          averageResponseTime: (apiMetrics && apiMetrics.averageResponseTime) || 0
         },
-        queues: queueStats,
+        queues: queueStats || {},
         system: {
-          cpuUsage: systemMetrics.cpuUsage || 0,
-          memoryUsage: systemMetrics.memoryUsage || 0,
-          uptime: systemMetrics.uptime || 0
+          cpuUsage: (systemMetrics && systemMetrics.cpuUsage) || 0,
+          memoryUsage: (systemMetrics && systemMetrics.memoryUsage) || 0,
+          uptime: (systemMetrics && systemMetrics.uptime) || 0
         }
       });
 
