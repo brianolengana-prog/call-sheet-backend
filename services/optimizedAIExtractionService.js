@@ -335,14 +335,20 @@ class OptimizedAIExtractionService {
       const cacheHealth = await this.cacheService.getHealthStatus();
       const monitoringHealth = this.monitoringService.getHealthStatus();
       
-      const overallStatus = 
-        queueHealth.status === 'healthy' && 
-        cacheHealth.status === 'healthy' && 
-        monitoringHealth.status === 'healthy' 
-          ? 'healthy' : 'unhealthy';
+      // Core service is healthy if monitoring is healthy (queue and cache are optional)
+      const coreHealthy = monitoringHealth.status === 'healthy';
+      const queueHealthy = queueHealth.status === 'healthy' || queueHealth.status === 'degraded';
+      const cacheHealthy = cacheHealth.status === 'healthy' || cacheHealth.status === 'degraded';
+      
+      const overallStatus = coreHealthy ? 'healthy' : 'unhealthy';
+      const degradedServices = [];
+      
+      if (queueHealth.status !== 'healthy') degradedServices.push('queue');
+      if (cacheHealth.status !== 'healthy') degradedServices.push('cache');
       
       return {
         status: overallStatus,
+        degraded: degradedServices,
         services: {
           queue: queueHealth,
           cache: cacheHealth,

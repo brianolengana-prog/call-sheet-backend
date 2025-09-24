@@ -127,19 +127,31 @@ class CacheService {
    * Setup memory monitoring to prevent connection issues
    */
   setupMemoryMonitoring() {
+    let lastAlertTime = 0;
+    const alertCooldown = 60000; // 1 minute between alerts
+    
     setInterval(() => {
       const memUsage = process.memoryUsage();
       const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
       const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
       const memoryPercentage = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+      const now = Date.now();
 
-      if (memoryPercentage > 90) {
-        console.warn(`⚠️ High memory usage: ${memoryPercentage}% (${heapUsedMB}MB/${heapTotalMB}MB)`);
+      // Only alert if above 85% and enough time has passed since last alert
+      if (memoryPercentage > 85 && (now - lastAlertTime) > alertCooldown) {
+        console.warn(`🚨 Alert: High memory usage: ${memoryPercentage}% (${heapUsedMB}MB/${heapTotalMB}MB)`);
+        lastAlertTime = now;
         
         // Force garbage collection if available
         if (global.gc) {
           global.gc();
           console.log('🧹 Forced garbage collection');
+        }
+        
+        // Clear cache if memory is critically high
+        if (memoryPercentage > 90) {
+          this.clearAllCaches();
+          console.log('🧹 Cleared all caches due to critical memory usage');
         }
       }
     }, 30000); // Check every 30 seconds
@@ -446,6 +458,24 @@ class CacheService {
    */
   async getHealthStatus() {
     try {
+      if (this.redisDisabled) {
+        return {
+          status: 'degraded',
+          redis: 'disabled',
+          message: 'Redis disabled by environment variable',
+          timestamp: new Date().toISOString()
+        };
+      }
+      
+      if (!this.redis || !this.redisConnected) {
+        return {
+          status: 'degraded',
+          redis: 'disconnected',
+          error: 'Redis not connected',
+          timestamp: new Date().toISOString()
+        };
+      }
+      
       await this.redis.ping();
       const stats = this.getStats();
       
@@ -457,7 +487,7 @@ class CacheService {
       };
     } catch (error) {
       return {
-        status: 'unhealthy',
+        status: 'degraded',
         redis: 'disconnected',
         error: error.message,
         timestamp: new Date().toISOString()
@@ -476,6 +506,38 @@ class CacheService {
       return true;
     } catch (error) {
       console.error('❌ Cache clear all error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Emergency memory cleanup
+   * @returns {Promise<boolean>} Success status
+   */
+  async emergencyCleanup() {
+    try {
+      console.log('🚨 Emergency memory cleanup initiated');
+      
+      // Clear all caches
+      await this.clearAll();
+      
+      // Force garbage collection multiple times
+      if (global.gc) {
+        for (let i = 0; i < 3; i++) {
+          global.gc();
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        console.log('🧹 Multiple garbage collection cycles completed');
+      }
+      
+      // Log final memory usage
+      const memUsage = process.memoryUsage();
+      const memoryPercentage = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+      console.log(`📊 Memory after cleanup: ${memoryPercentage}%`);
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Emergency cleanup failed:', error);
       return false;
     }
   }

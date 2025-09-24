@@ -351,9 +351,18 @@ class QueueService {
    */
   async getHealthStatus() {
     try {
+      if (this.redisDisabled) {
+        return {
+          status: 'degraded',
+          redis: 'disabled',
+          message: 'Redis disabled by environment variable',
+          timestamp: new Date().toISOString()
+        };
+      }
+      
       if (!this.redisConnected) {
         return {
-          status: 'unhealthy',
+          status: 'degraded',
           redis: 'disconnected',
           error: 'Redis not connected',
           timestamp: new Date().toISOString()

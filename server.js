@@ -160,6 +160,18 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Root endpoint for health checks (Render, etc.)
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    service: 'CallSheet AI Stripe Backend',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    version: '1.0.0'
+  });
+});
+
 // CSRF protection (after body parsing)
 app.use(csrfProtection);
 
