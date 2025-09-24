@@ -70,17 +70,25 @@ router.post('/upload',
         });
       }
 
-      // Validate request body
-      const validationResult = customExtractionUploadSchema.safeParse(req.body);
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid request parameters',
-          details: validationResult.error.errors
-        });
+      // Parse options from request body (frontend sends as JSON string)
+      let options = {};
+      let rolePreferences = [];
+      
+      try {
+        if (req.body.options) {
+          options = typeof req.body.options === 'string' 
+            ? JSON.parse(req.body.options) 
+            : req.body.options;
+        }
+        if (req.body.rolePreferences) {
+          rolePreferences = Array.isArray(req.body.rolePreferences) 
+            ? req.body.rolePreferences 
+            : JSON.parse(req.body.rolePreferences);
+        }
+      } catch (parseError) {
+        console.warn('⚠️ Failed to parse request options:', parseError.message);
+        // Continue with empty options
       }
-
-      const { rolePreferences, options } = validationResult.data;
 
       logExtractionEvent(req, 'optimized_upload_started', {
         fileName: req.file.originalname,
@@ -223,17 +231,25 @@ router.post('/sync-upload',
         });
       }
 
-      // Validate request body
-      const validationResult = customExtractionUploadSchema.safeParse(req.body);
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid request parameters',
-          details: validationResult.error.errors
-        });
+      // Parse options from request body (frontend sends as JSON string)
+      let options = {};
+      let rolePreferences = [];
+      
+      try {
+        if (req.body.options) {
+          options = typeof req.body.options === 'string' 
+            ? JSON.parse(req.body.options) 
+            : req.body.options;
+        }
+        if (req.body.rolePreferences) {
+          rolePreferences = Array.isArray(req.body.rolePreferences) 
+            ? req.body.rolePreferences 
+            : JSON.parse(req.body.rolePreferences);
+        }
+      } catch (parseError) {
+        console.warn('⚠️ Failed to parse request options:', parseError.message);
+        // Continue with empty options
       }
-
-      const { rolePreferences, options } = validationResult.data;
 
       logExtractionEvent(req, 'sync_optimized_upload_started', {
         fileName: req.file.originalname,
@@ -360,17 +376,25 @@ router.post('/batch',
         });
       }
 
-      // Validate request body
-      const validationResult = customExtractionUploadSchema.safeParse(req.body);
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid request parameters',
-          details: validationResult.error.errors
-        });
+      // Parse options from request body (frontend sends as JSON string)
+      let options = {};
+      let rolePreferences = [];
+      
+      try {
+        if (req.body.options) {
+          options = typeof req.body.options === 'string' 
+            ? JSON.parse(req.body.options) 
+            : req.body.options;
+        }
+        if (req.body.rolePreferences) {
+          rolePreferences = Array.isArray(req.body.rolePreferences) 
+            ? req.body.rolePreferences 
+            : JSON.parse(req.body.rolePreferences);
+        }
+      } catch (parseError) {
+        console.warn('⚠️ Failed to parse request options:', parseError.message);
+        // Continue with empty options
       }
-
-      const { rolePreferences, options } = validationResult.data;
 
       logExtractionEvent(req, 'batch_processing_started', {
         fileCount: req.files.length,
