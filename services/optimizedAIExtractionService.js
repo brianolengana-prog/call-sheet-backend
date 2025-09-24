@@ -201,7 +201,7 @@ class OptimizedAIExtractionService {
         try {
           const CustomExtractionService = require('./customExtractionService');
           const customService = new CustomExtractionService();
-          const customResult = await customService.extractContactsFromBuffer(fileBuffer, fileName, mimeType, options);
+          const customResult = await customService.extractContacts(fileBuffer, mimeType, fileName, options);
           if (customResult && Array.isArray(customResult.contacts) && customResult.contacts.length > 0) {
             result = { ...customResult, metadata: { ...(customResult.metadata || {}), primary: 'custom' } };
           }
@@ -242,7 +242,7 @@ class OptimizedAIExtractionService {
           // Lazy-require to avoid loading cost unless needed
           const CustomExtractionService = require('./customExtractionService');
           const customService = new CustomExtractionService();
-          const customResult = await customService.extractContactsFromBuffer(fileBuffer, fileName, mimeType, options);
+          const customResult = await customService.extractContacts(fileBuffer, mimeType, fileName, options);
           if (customResult && Array.isArray(customResult.contacts) && customResult.contacts.length > 0) {
             finalResult = {
               ...customResult,
