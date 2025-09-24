@@ -1,9 +1,13 @@
+/**
+ * Validation Schemas
+ * 
+ * Zod schemas for input validation across all endpoints
+ */
 
-
-import { z } from 'zod';
+const { z } = require('zod');
 
 // File upload validation
-export const fileUploadSchema = z.object({
+const fileUploadSchema = z.object({
   file: z.object({
     fieldname: z.string(),
     originalname: z.string().min(1, 'File name is required'),
@@ -20,7 +24,7 @@ export const fileUploadSchema = z.object({
       'image/bmp',
       'text/plain'
     ]).refine(
-      (mimetype) => allowedMimeTypes.includes(mimetype as typeof allowedMimeTypes[number]),
+      (mimetype) => allowedMimeTypes.includes(mimetype),
       {
         message: 'Unsupported file type'
       }
@@ -35,7 +39,7 @@ export const fileUploadSchema = z.object({
 });
 
 // Contact validation
-export const contactSchema = z.object({
+const contactSchema = z.object({
   name: z.string()
     .min(1, 'Name is required')
     .max(100, 'Name cannot exceed 100 characters')
@@ -77,7 +81,7 @@ export const contactSchema = z.object({
 });
 
 // Extraction request validation
-export const extractionRequestSchema = z.object({
+const extractionRequestSchema = z.object({
   rolePreferences: z.array(z.string().max(50)).optional(),
   options: z.object({
     includeNotes: z.boolean().optional(),
@@ -88,7 +92,7 @@ export const extractionRequestSchema = z.object({
 });
 
 // User input sanitization
-export const sanitizeString = (input: string): string => {
+const sanitizeString = (input) => {
   return input
     .trim()
     .replace(/[<>]/g, '') // Remove potential HTML tags
@@ -98,7 +102,7 @@ export const sanitizeString = (input: string): string => {
 };
 
 // File type validation
-export const allowedMimeTypes = [
+const allowedMimeTypes = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -109,48 +113,48 @@ export const allowedMimeTypes = [
   'image/tiff',
   'image/bmp',
   'text/plain'
-] as const;
+];
 
-export const maxFileSize = 10 * 1024 * 1024; // 10MB
+const maxFileSize = 10 * 1024 * 1024; // 10MB
 
 // Validation error types
-export interface ValidationError {
-  field: string;
-  message: string;
-  code: string;
-}
+const ValidationError = {
+  field: z.string(),
+  message: z.string(),
+  code: z.string()
+};
 
-export interface ValidationResult {
-  success: boolean;
-  data?: unknown;
-  errors?: ValidationError[];
-}
+const ValidationResult = {
+  success: z.boolean(),
+  data: z.unknown().optional(),
+  errors: z.array(ValidationError).optional()
+};
 
 // Custom validation functions
-export const validateEmail = (email: string): boolean => {
+const validateEmail = (email) => {
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   return emailRegex.test(email);
 };
 
-export const validatePhone = (phone: string): boolean => {
+const validatePhone = (phone) => {
   const phoneRegex = /^[+]?[\d\s-()]{10,}$/;
   return phoneRegex.test(phone);
 };
 
-export const validateName = (name: string): boolean => {
+const validateName = (name) => {
   const nameRegex = /^[a-zA-Z\s-'.]+$/;
-  return nameRegex.test(name) && name.length >= 1 && name.length <= 100;
+  return nameRegex.test(name) && name.length >= 2 && name.length <= 100;
 };
 
 // Rate limiting schemas
-export const rateLimitSchema = z.object({
+const rateLimitSchema = z.object({
   windowMs: z.number().min(1000), // Minimum 1 second
   max: z.number().min(1).max(1000), // Maximum 1000 requests
   message: z.string().optional()
 });
 
 // Security headers validation
-export const securityHeadersSchema = z.object({
+const securityHeadersSchema = z.object({
   'x-frame-options': z.enum(['DENY', 'SAMEORIGIN']).optional(),
   'x-content-type-options': z.literal('nosniff').optional(),
   'x-xss-protection': z.literal('1; mode=block').optional(),
@@ -159,7 +163,7 @@ export const securityHeadersSchema = z.object({
 });
 
 // Custom extraction request validation
-export const customExtractionUploadSchema = z.object({
+const customExtractionUploadSchema = z.object({
   rolePreferences: z.array(z.string().max(50)).optional(),
   options: z.object({
     includeNotes: z.boolean().optional(),
@@ -169,21 +173,21 @@ export const customExtractionUploadSchema = z.object({
   }).optional()
 });
 
-export const customExtractionTestSchema = z.object({
+const customExtractionTestSchema = z.object({
   text: z.string().min(10, 'Text must be at least 10 characters').max(100000, 'Text too long'),
   documentType: z.enum(['call_sheet', 'contact_list', 'production_document', 'resume', 'business_card', 'unknown']).optional(),
   productionType: z.enum(['film', 'television', 'commercial', 'corporate', 'theatre', 'unknown']).optional()
 });
 
 // API key validation
-export const apiKeySchema = z.object({
+const apiKeySchema = z.object({
   name: z.string().min(1, 'API key name is required').max(100, 'Name too long'),
   permissions: z.array(z.enum(['extract', 'test', 'admin'])).min(1, 'At least one permission required'),
   expiresAt: z.string().datetime().optional()
 });
 
 // Usage tracking validation
-export const usageTrackingSchema = z.object({
+const usageTrackingSchema = z.object({
   userId: z.string().uuid(),
   operation: z.enum(['extract', 'test', 'upload']),
   documentSize: z.number().min(0),
@@ -191,3 +195,23 @@ export const usageTrackingSchema = z.object({
   contactsExtracted: z.number().min(0),
   cost: z.number().min(0)
 });
+
+module.exports = {
+  fileUploadSchema,
+  contactSchema,
+  extractionRequestSchema,
+  sanitizeString,
+  allowedMimeTypes,
+  maxFileSize,
+  ValidationError,
+  ValidationResult,
+  validateEmail,
+  validatePhone,
+  validateName,
+  rateLimitSchema,
+  securityHeadersSchema,
+  customExtractionUploadSchema,
+  customExtractionTestSchema,
+  apiKeySchema,
+  usageTrackingSchema
+};

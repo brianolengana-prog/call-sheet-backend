@@ -1,0 +1,8 @@
+
+        CALL SHEET - DAY 1
+        
+        CREW CONTACTS:
+        Director: John Smith - john@studio.com - (555) 123-4567
+        Producer: Jane Doe - jane@studio.com - (555) 987-6543
+        Cinematographer: Bob Johnson - bob@camera.com - (555) 456-7890
+      

@@ -20,6 +20,8 @@ const usageRoutes = require('./routes/usage');
 const stripeEnhancedRoutes = require('./routes/stripeEnhanced');
 const contactsRoutes = require('./routes/contacts');
 const customExtractionRoutes = require('./routes/customExtraction');
+const optimizedExtractionRoutes = require('./routes/optimizedExtraction');
+const apiKeyRoutes = require('./routes/apiKeys');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
@@ -35,6 +37,7 @@ const {
   suspiciousActivityDetector
 } = require('./middleware/security');
 const authLogger = require('./utils/authLogger');
+const { structuredLogging } = require('./middleware/logging');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -55,6 +58,9 @@ app.use(securityHeaders);
 
 // Security logging
 app.use(securityLogger);
+
+// Structured logging with correlation IDs
+app.use(structuredLogging);
 
 // Helmet for additional security headers
 app.use(helmet({
@@ -171,6 +177,8 @@ app.use('/api/support', apiRateLimit, supportRoutes);
 app.use('/api/contacts', apiRateLimit, contactsRoutes);
 app.use('/api/jobs', apiRateLimit, contactsRoutes); // Jobs are handled by contacts route
 app.use('/api/custom-extraction', apiRateLimit, customExtractionRoutes);
+app.use('/api/optimized-extraction', apiRateLimit, optimizedExtractionRoutes);
+app.use('/api/api-keys', apiRateLimit, apiKeyRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

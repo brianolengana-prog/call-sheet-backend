@@ -1,131 +1,493 @@
 /**
- * Caching Service for Document Processing
- * Implements multi-level caching for performance optimization
+ * Cache Service
+ * 
+ * Intelligent caching system for AI models and results
+ * Implements Redis-based caching with smart invalidation
  */
 
 const Redis = require('ioredis');
-const NodeCache = require('node-cache');
+const crypto = require('crypto');
 
 class CacheService {
   constructor() {
-    // Redis for distributed caching
-    this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+    // Check if Redis should be disabled due to previous failures
+    this.redisDisabled = process.env.REDIS_DISABLED === 'true';
     
-    // In-memory cache for frequently accessed data
-    this.memoryCache = new NodeCache({
-      stdTTL: 300, // 5 minutes
-      checkperiod: 120, // 2 minutes
-      useClones: false
+    if (this.redisDisabled) {
+      console.log('⚠️ Cache Redis: Disabled by environment variable');
+      this.redis = null;
+      this.redisConnected = false;
+      return;
+    }
+
+    this.redis = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: process.env.REDIS_PORT || 6379,
+      password: process.env.REDIS_PASSWORD,
+      retryDelayOnFailover: 0, // Disable retry delays
+      maxRetriesPerRequest: 0, // Disable retries to prevent loops
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout: 5000,
+      commandTimeout: 2000,
+      keepAlive: 30000,
+      family: 4,
+      retryDelayOnClusterDown: 0, // Disable cluster retry delays
+      enableReadyCheck: false,
+      maxLoadingTimeout: 5000,
+      enableAutoPipelining: false // Disable auto pipelining
     });
-    
-    this.setupCacheStrategies();
+
+    this.redisConnected = false;
+    this.setupRedisHandlers();
+
+    this.defaultTTL = {
+      aiModel: 3600, // 1 hour
+      aiResult: 1800, // 30 minutes
+      documentAnalysis: 900, // 15 minutes
+      patternExtraction: 600, // 10 minutes
+      productionIntelligence: 1200, // 20 minutes
+      userSession: 1800, // 30 minutes
+      apiResponse: 300 // 5 minutes
+    };
+
+    this.cacheStats = {
+      hits: 0,
+      misses: 0,
+      sets: 0,
+      deletes: 0,
+      totalRequests: 0
+    };
+
+    this.initializeCache();
   }
 
   /**
-   * Setup caching strategies
+   * Setup Redis connection handlers
    */
-  setupCacheStrategies() {
-    // Document text caching
-    this.documentCache = {
-      key: 'doc:text:',
-      ttl: 3600, // 1 hour
-      strategy: 'redis'
+  setupRedisHandlers() {
+    let connectionFailures = 0;
+    const maxFailures = 2; // Reduced to 2 failures
+
+    this.redis.on('connect', () => {
+      console.log('✅ Cache Redis connected');
+      this.redisConnected = true;
+      connectionFailures = 0; // Reset on successful connection
+    });
+
+    this.redis.on('error', (error) => {
+      connectionFailures++;
+      console.warn(`⚠️ Cache Redis connection error (${connectionFailures}/${maxFailures}):`, error.message);
+      this.redisConnected = false;
+      
+      // If too many failures, disable Redis entirely and stop all reconnection attempts
+      if (connectionFailures >= maxFailures) {
+        console.warn('⚠️ Cache Redis: Too many connection failures, disabling Redis permanently');
+        this.redis.disconnect();
+        this.redis.removeAllListeners(); // Remove all event listeners
+        this.redis = null; // Disable Redis entirely
+        this.redisDisabled = true;
+        
+        // Set environment variable to disable Redis on next restart
+        process.env.REDIS_DISABLED = 'true';
+        console.log('⚠️ Cache Redis: Set REDIS_DISABLED=true for next restart');
+      }
+    });
+
+    this.redis.on('close', () => {
+      console.warn('⚠️ Cache Redis connection closed');
+      this.redisConnected = false;
+    });
+
+    this.redis.on('reconnecting', () => {
+      console.log('🔄 Cache Redis: Reconnecting...');
+    });
+  }
+
+  /**
+   * Initialize cache with default configurations
+   */
+  async initializeCache() {
+    try {
+      if (this.redisConnected) {
+        await this.redis.ping();
+        console.log('✅ Cache service connected to Redis');
+      } else {
+        console.warn('⚠️ Cache service running without Redis (fallback mode)');
+      }
+    } catch (error) {
+      console.warn('⚠️ Cache service Redis connection failed, running in fallback mode:', error.message);
+    }
+
+    // Set up memory monitoring
+    this.setupMemoryMonitoring();
+  }
+
+  /**
+   * Setup memory monitoring to prevent connection issues
+   */
+  setupMemoryMonitoring() {
+    setInterval(() => {
+      const memUsage = process.memoryUsage();
+      const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+      const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+      const memoryPercentage = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+
+      if (memoryPercentage > 90) {
+        console.warn(`⚠️ High memory usage: ${memoryPercentage}% (${heapUsedMB}MB/${heapTotalMB}MB)`);
+        
+        // Force garbage collection if available
+        if (global.gc) {
+          global.gc();
+          console.log('🧹 Forced garbage collection');
+        }
+      }
+    }, 30000); // Check every 30 seconds
+  }
+
+  /**
+   * Generate cache key with namespace
+   * @param {string} namespace - Cache namespace
+   * @param {string} key - Cache key
+   * @param {Object} params - Additional parameters for key generation
+   * @returns {string} Generated cache key
+   */
+  generateKey(namespace, key, params = {}) {
+    const paramString = Object.keys(params).length > 0 
+      ? crypto.createHash('md5').update(JSON.stringify(params)).digest('hex')
+      : '';
+    
+    return `cache:${namespace}:${key}${paramString ? `:${paramString}` : ''}`;
+  }
+
+  /**
+   * Get value from cache
+   * @param {string} namespace - Cache namespace
+   * @param {string} key - Cache key
+   * @param {Object} params - Additional parameters
+   * @returns {Promise<Object|null>} Cached value or null
+   */
+  async get(namespace, key, params = {}) {
+    try {
+      this.cacheStats.totalRequests++;
+      
+      if (!this.redis || !this.redisConnected) {
+        this.cacheStats.misses++;
+        return null;
+      }
+      
+      const cacheKey = this.generateKey(namespace, key, params);
+      const value = await this.redis.get(cacheKey);
+      
+      if (value) {
+        this.cacheStats.hits++;
+        return JSON.parse(value);
+      } else {
+        this.cacheStats.misses++;
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Cache get error:', error);
+      this.cacheStats.misses++;
+      return null;
+    }
+  }
+
+  /**
+   * Set value in cache
+   * @param {string} namespace - Cache namespace
+   * @param {string} key - Cache key
+   * @param {Object} value - Value to cache
+   * @param {Object} params - Additional parameters
+   * @param {number} ttl - Time to live in seconds
+   * @returns {Promise<boolean>} Success status
+   */
+  async set(namespace, key, value, params = {}, ttl = null) {
+    try {
+      this.cacheStats.sets++;
+      
+      if (!this.redis || !this.redisConnected) {
+        return false;
+      }
+      
+      const cacheKey = this.generateKey(namespace, key, params);
+      const ttlToUse = ttl || this.defaultTTL[namespace] || 300;
+      
+      await this.redis.setex(cacheKey, ttlToUse, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      console.error('❌ Cache set error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete value from cache
+   * @param {string} namespace - Cache namespace
+   * @param {string} key - Cache key
+   * @param {Object} params - Additional parameters
+   * @returns {Promise<boolean>} Success status
+   */
+  async delete(namespace, key, params = {}) {
+    try {
+      this.cacheStats.deletes++;
+      
+      const cacheKey = this.generateKey(namespace, key, params);
+      const result = await this.redis.del(cacheKey);
+      return result > 0;
+    } catch (error) {
+      console.error('❌ Cache delete error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Clear all cache entries for a namespace
+   * @param {string} namespace - Cache namespace
+   * @returns {Promise<number>} Number of keys deleted
+   */
+  async clearNamespace(namespace) {
+    try {
+      const pattern = `cache:${namespace}:*`;
+      const keys = await this.redis.keys(pattern);
+      
+      if (keys.length > 0) {
+        return await this.redis.del(...keys);
+      }
+      
+      return 0;
+    } catch (error) {
+      console.error('❌ Cache clear namespace error:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Cache AI model results
+   * @param {string} modelType - Type of AI model
+   * @param {Object} input - Model input
+   * @param {Object} result - Model result
+   * @param {number} ttl - Time to live
+   * @returns {Promise<boolean>} Success status
+   */
+  async cacheAIModel(modelType, input, result, ttl = null) {
+    const params = {
+      modelType,
+      inputHash: crypto.createHash('md5').update(JSON.stringify(input)).digest('hex')
     };
     
-    // AI extraction results caching
-    this.extractionCache = {
-      key: 'ai:extraction:',
-      ttl: 1800, // 30 minutes
-      strategy: 'redis'
+    return this.set('aiModel', modelType, result, params, ttl);
+  }
+
+  /**
+   * Get cached AI model results
+   * @param {string} modelType - Type of AI model
+   * @param {Object} input - Model input
+   * @returns {Promise<Object|null>} Cached result or null
+   */
+  async getCachedAIModel(modelType, input) {
+    const params = {
+      modelType,
+      inputHash: crypto.createHash('md5').update(JSON.stringify(input)).digest('hex')
     };
     
-    // User preferences caching
-    this.preferencesCache = {
-      key: 'user:prefs:',
-      ttl: 1800, // 30 minutes
-      strategy: 'memory'
+    return this.get('aiModel', modelType, params);
+  }
+
+  /**
+   * Cache document analysis results
+   * @param {Buffer} fileBuffer - File buffer
+   * @param {string} mimeType - MIME type
+   * @param {Object} result - Analysis result
+   * @returns {Promise<boolean>} Success status
+   */
+  async cacheDocumentAnalysis(fileBuffer, mimeType, result) {
+    const params = {
+      fileHash: crypto.createHash('md5').update(fileBuffer).digest('hex'),
+      mimeType
     };
+    
+    return this.set('documentAnalysis', 'analysis', result, params);
   }
 
   /**
-   * Cache document text
+   * Get cached document analysis
+   * @param {Buffer} fileBuffer - File buffer
+   * @param {string} mimeType - MIME type
+   * @returns {Promise<Object|null>} Cached result or null
    */
-  async cacheDocumentText(fileHash, text) {
-    const key = `${this.documentCache.key}${fileHash}`;
-    await this.redis.setex(key, this.documentCache.ttl, text);
+  async getCachedDocumentAnalysis(fileBuffer, mimeType) {
+    const params = {
+      fileHash: crypto.createHash('md5').update(fileBuffer).digest('hex'),
+      mimeType
+    };
+    
+    return this.get('documentAnalysis', 'analysis', params);
   }
 
   /**
-   * Get cached document text
+   * Cache pattern extraction results
+   * @param {string} text - Extracted text
+   * @param {Object} documentAnalysis - Document analysis
+   * @param {Array} contacts - Extracted contacts
+   * @returns {Promise<boolean>} Success status
    */
-  async getCachedDocumentText(fileHash) {
-    const key = `${this.documentCache.key}${fileHash}`;
-    return await this.redis.get(key);
+  async cachePatternExtraction(text, documentAnalysis, contacts) {
+    const params = {
+      textHash: crypto.createHash('md5').update(text).digest('hex'),
+      docType: documentAnalysis.type
+    };
+    
+    return this.set('patternExtraction', 'contacts', contacts, params);
   }
 
   /**
-   * Cache AI extraction results
+   * Get cached pattern extraction
+   * @param {string} text - Extracted text
+   * @param {Object} documentAnalysis - Document analysis
+   * @returns {Promise<Array|null>} Cached contacts or null
    */
-  async cacheExtractionResults(textHash, contacts) {
-    const key = `${this.extractionCache.key}${textHash}`;
-    await this.redis.setex(key, this.extractionCache.ttl, JSON.stringify(contacts));
+  async getCachedPatternExtraction(text, documentAnalysis) {
+    const params = {
+      textHash: crypto.createHash('md5').update(text).digest('hex'),
+      docType: documentAnalysis.type
+    };
+    
+    return this.get('patternExtraction', 'contacts', params);
   }
 
   /**
-   * Get cached extraction results
+   * Cache production intelligence results
+   * @param {Array} contacts - Input contacts
+   * @param {Object} documentAnalysis - Document analysis
+   * @param {Array} enhancedContacts - Enhanced contacts
+   * @returns {Promise<boolean>} Success status
    */
-  async getCachedExtractionResults(textHash) {
-    const key = `${this.extractionCache.key}${textHash}`;
-    const cached = await this.redis.get(key);
-    return cached ? JSON.parse(cached) : null;
+  async cacheProductionIntelligence(contacts, documentAnalysis, enhancedContacts) {
+    const params = {
+      contactsHash: crypto.createHash('md5').update(JSON.stringify(contacts)).digest('hex'),
+      docType: documentAnalysis.type,
+      productionType: documentAnalysis.productionType
+    };
+    
+    return this.set('productionIntelligence', 'enhanced', enhancedContacts, params);
   }
 
   /**
-   * Cache user preferences
+   * Get cached production intelligence
+   * @param {Array} contacts - Input contacts
+   * @param {Object} documentAnalysis - Document analysis
+   * @returns {Promise<Array|null>} Cached enhanced contacts or null
    */
-  cacheUserPreferences(userId, preferences) {
-    const key = `${this.preferencesCache.key}${userId}`;
-    this.memoryCache.set(key, preferences);
+  async getCachedProductionIntelligence(contacts, documentAnalysis) {
+    const params = {
+      contactsHash: crypto.createHash('md5').update(JSON.stringify(contacts)).digest('hex'),
+      docType: documentAnalysis.type,
+      productionType: documentAnalysis.productionType
+    };
+    
+    return this.get('productionIntelligence', 'enhanced', params);
   }
 
   /**
-   * Get cached user preferences
+   * Cache complete AI extraction results
+   * @param {Buffer} fileBuffer - File buffer
+   * @param {string} mimeType - MIME type
+   * @param {Object} options - Extraction options
+   * @param {Object} result - Complete extraction result
+   * @returns {Promise<boolean>} Success status
    */
-  getCachedUserPreferences(userId) {
-    const key = `${this.preferencesCache.key}${userId}`;
-    return this.memoryCache.get(key);
+  async cacheCompleteExtraction(fileBuffer, mimeType, options, result) {
+    const params = {
+      fileHash: crypto.createHash('md5').update(fileBuffer).digest('hex'),
+      mimeType,
+      optionsHash: crypto.createHash('md5').update(JSON.stringify(options)).digest('hex')
+    };
+    
+    return this.set('aiResult', 'complete', result, params);
   }
 
   /**
-   * Generate cache keys
+   * Get cached complete AI extraction
+   * @param {Buffer} fileBuffer - File buffer
+   * @param {string} mimeType - MIME type
+   * @param {Object} options - Extraction options
+   * @returns {Promise<Object|null>} Cached result or null
    */
-  generateFileHash(buffer) {
-    const crypto = require('crypto');
-    return crypto.createHash('md5').update(buffer).digest('hex');
-  }
-
-  generateTextHash(text) {
-    const crypto = require('crypto');
-    return crypto.createHash('md5').update(text).digest('hex');
+  async getCachedCompleteExtraction(fileBuffer, mimeType, options) {
+    const params = {
+      fileHash: crypto.createHash('md5').update(fileBuffer).digest('hex'),
+      mimeType,
+      optionsHash: crypto.createHash('md5').update(JSON.stringify(options)).digest('hex')
+    };
+    
+    return this.get('aiResult', 'complete', params);
   }
 
   /**
-   * Cache statistics
+   * Get cache statistics
+   * @returns {Object} Cache statistics
    */
-  async getCacheStats() {
-    const memoryStats = this.memoryCache.getStats();
-    const redisInfo = await this.redis.info('memory');
+  getStats() {
+    const hitRate = this.cacheStats.totalRequests > 0 
+      ? (this.cacheStats.hits / this.cacheStats.totalRequests) * 100 
+      : 0;
     
     return {
-      memory: memoryStats,
-      redis: redisInfo,
-      strategies: {
-        document: this.documentCache,
-        extraction: this.extractionCache,
-        preferences: this.preferencesCache
-      }
+      ...this.cacheStats,
+      hitRate: Math.round(hitRate * 100) / 100,
+      timestamp: new Date().toISOString()
     };
+  }
+
+  /**
+   * Get cache health status
+   * @returns {Promise<Object>} Health status
+   */
+  async getHealthStatus() {
+    try {
+      await this.redis.ping();
+      const stats = this.getStats();
+      
+      return {
+        status: 'healthy',
+        redis: 'connected',
+        stats,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        redis: 'disconnected',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  /**
+   * Clear all cache
+   * @returns {Promise<boolean>} Success status
+   */
+  async clearAll() {
+    try {
+      await this.redis.flushdb();
+      console.log('✅ All cache cleared');
+      return true;
+    } catch (error) {
+      console.error('❌ Cache clear all error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Close cache service
+   * @returns {Promise<void>}
+   */
+  async close() {
+    await this.redis.quit();
+    console.log('✅ Cache service closed');
   }
 }
 
-module.exports = new CacheService();
+module.exports = CacheService;
