@@ -43,7 +43,13 @@ const contactSchema = z.object({
   name: z.string()
     .min(1, 'Name is required')
     .max(100, 'Name cannot exceed 100 characters')
-    .regex(/^[a-zA-Z\s-'.]+$/, 'Name contains invalid characters'),
+    .refine((name) => {
+      // Reject obvious header rows
+      const headerKeywords = ['first name', 'last name', 'name', 'email', 'phone', 'website', 'address', 'category', 'representative'];
+      const lowerName = name.toLowerCase();
+      const isHeader = headerKeywords.some(keyword => lowerName.includes(keyword));
+      return !isHeader;
+    }, 'Name appears to be a header row, not a person'),
   
   email: z.string()
     .email('Invalid email format')
