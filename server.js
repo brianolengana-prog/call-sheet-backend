@@ -104,19 +104,19 @@ app.use(cors({
     // Check if origin is in allowed list
     if (allowedOrigins.includes(origin)) {
       console.log('✅ CORS: Origin allowed from allowedOrigins list');
-      return callback(null, origin); // Return the actual origin, not true
+      return callback(null, true);
     }
     
     // Check for Vercel preview domains
     if (origin && origin.endsWith('.vercel.app')) {
       console.log('✅ CORS: Origin allowed (Vercel preview domain)');
-      return callback(null, origin); // Return the actual origin
+      return callback(null, true);
     }
     
     // Check for localhost with any port
     if (origin && origin.startsWith('http://localhost:')) {
       console.log('✅ CORS: Origin allowed (localhost)');
-      return callback(null, origin); // Return the actual origin
+      return callback(null, true);
     }
     
     console.log('❌ CORS: Origin rejected:', origin);
@@ -128,7 +128,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cache-Control', 'Pragma', 'Expires', 'X-Timestamp'],
   exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
   preflightContinue: false,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 204
 }));
 
 // Cookie parsing middleware

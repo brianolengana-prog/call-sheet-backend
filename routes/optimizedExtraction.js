@@ -6,6 +6,7 @@
  */
 
 const express = require('express');
+const cors = require('cors');
 const multer = require('multer');
 const { authenticateToken } = require('../middleware/auth');
 const { authenticateAPIKey, requireAPIKeyPermission } = require('../middleware/apiKeyAuth');
@@ -15,6 +16,12 @@ const antivirusService = require('../services/antivirusService');
 const OptimizedAIExtractionService = require('../services/optimizedAIExtractionService');
 
 const router = express.Router();
+const routeCors = cors({
+  origin: (origin, cb) => cb(null, true),
+  credentials: true,
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Accept','Origin']
+});
 const optimizedService = new OptimizedAIExtractionService();
 
 // Configure multer for file uploads
@@ -48,7 +55,9 @@ const upload = multer({
  * POST /api/optimized-extraction/upload
  * Optimized AI extraction with queue system and caching
  */
+router.options('/upload', routeCors);
 router.post('/upload',
+  routeCors,
   // Try API key auth first, then JWT auth
   async (req, res, next) => {
     const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
@@ -209,7 +218,9 @@ router.post('/upload',
  * POST /api/optimized-extraction/sync-upload
  * Synchronous optimized AI extraction (for immediate results)
  */
+router.options('/sync-upload', routeCors);
 router.post('/sync-upload',
+  routeCors,
   // Try API key auth first, then JWT auth
   async (req, res, next) => {
     const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
@@ -355,7 +366,9 @@ router.post('/sync-upload',
  * POST /api/optimized-extraction/batch
  * Batch processing for multiple files
  */
+router.options('/batch', routeCors);
 router.post('/batch',
+  routeCors,
   // Try API key auth first, then JWT auth
   async (req, res, next) => {
     const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
