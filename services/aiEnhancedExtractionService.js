@@ -203,9 +203,18 @@ class AIEnhancedExtractionService {
    */
   async extractTextFromPDF(fileBuffer) {
     try {
-      const data = fileBuffer instanceof Uint8Array
-        ? fileBuffer
-        : new Uint8Array(fileBuffer.buffer ? fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength) : fileBuffer);
+      let data;
+      if (typeof Buffer !== 'undefined' && Buffer.isBuffer(fileBuffer)) {
+        data = new Uint8Array(fileBuffer);
+      } else if (fileBuffer instanceof Uint8Array) {
+        data = new Uint8Array(fileBuffer);
+      } else if (typeof fileBuffer === 'string') {
+        data = new Uint8Array(Buffer.from(fileBuffer, 'binary'));
+      } else if (fileBuffer && fileBuffer.buffer) {
+        data = new Uint8Array(fileBuffer.buffer, fileBuffer.byteOffset || 0, fileBuffer.byteLength || fileBuffer.length || undefined);
+      } else {
+        data = new Uint8Array(fileBuffer);
+      }
       const pdf = await this.pdfjs.getDocument({ data }).promise;
       let fullText = '';
 
