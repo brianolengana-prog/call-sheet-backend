@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "build": "npm install --legacy-peer-deps",
     "test": "jest --testPathPattern=phase1.test.js",
     "test:all": "jest",
     "test:watch": "jest --watch",

@@ -285,11 +285,18 @@ app.use(errorHandler);
 const initializeServer = async () => {
   try {
     // Validate database configuration
+    console.log('🔍 Debug: DATABASE_URL exists:', !!process.env.DATABASE_URL);
+    console.log('🔍 Debug: DATABASE_URL value:', process.env.DATABASE_URL);
+    console.log('🔍 Debug: DATABASE_URL type:', typeof process.env.DATABASE_URL);
+    console.log('🔍 Debug: DATABASE_URL length:', process.env.DATABASE_URL?.length);
+    
     if (!process.env.DATABASE_URL) {
       throw new Error('❌ DATABASE_URL environment variable is required');
     }
     
     if (!process.env.DATABASE_URL.startsWith('postgresql://') && !process.env.DATABASE_URL.startsWith('postgres://')) {
+      console.log('❌ DATABASE_URL does not start with postgresql:// or postgres://');
+      console.log('❌ Actual value:', JSON.stringify(process.env.DATABASE_URL));
       throw new Error('❌ DATABASE_URL must start with postgresql:// or postgres://');
     }
     
