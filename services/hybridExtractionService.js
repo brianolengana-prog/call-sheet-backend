@@ -5,10 +5,11 @@ const ContactValidator = require('./extraction/contactValidator');
 
 class HybridExtractionService {
   constructor() {
-    this.customExtractionService = new CustomExtractionService();
-    this.aiPreprocessingService = new AIPreprocessingService();
-    this.patternExtractor = new PatternExtractor();
-    this.contactValidator = new ContactValidator();
+    // Use singleton instances to prevent memory leaks
+    this.customExtractionService = require('./customExtractionService');
+    this.aiPreprocessingService = require('./aiPreprocessingService');
+    this.patternExtractor = require('./extraction/patternExtractor');
+    this.contactValidator = require('./extraction/contactValidator');
   }
 
   async extractContacts(fileBuffer, mimeType, fileName) {

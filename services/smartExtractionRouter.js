@@ -12,10 +12,11 @@ const OptimizedAIExtractionService = require('./optimizedAIExtractionService');
 
 class SmartExtractionRouter {
   constructor() {
-    this.customService = new CustomExtractionService();
-    this.aiService = new AIEnhancedExtractionService();
-    this.hybridService = new HybridExtractionService();
-    this.optimizedService = new OptimizedAIExtractionService();
+    // Use singleton instances to prevent memory leaks
+    this.customService = require('./customExtractionService');
+    this.aiService = require('./aiEnhancedExtractionService');
+    this.hybridService = require('./hybridExtractionService');
+    this.optimizedService = require('./optimizedAIExtractionService');
     
     // Document structure patterns for routing decisions
     this.documentPatterns = this.initializeDocumentPatterns();

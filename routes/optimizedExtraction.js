@@ -24,7 +24,7 @@ const routeCors = cors({
   methods: ['GET','POST','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Accept','Origin']
 });
-const optimizedService = new OptimizedAIExtractionService();
+const optimizedService = require('../services/optimizedAIExtractionService');
 
 // Configure multer for file uploads
 const upload = multer({

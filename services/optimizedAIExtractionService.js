@@ -12,10 +12,11 @@ const AIEnhancedExtractionService = require('./aiEnhancedExtractionService');
 
 class OptimizedAIExtractionService {
   constructor() {
-    this.queueService = new QueueService();
-    this.cacheService = new CacheService();
-    this.monitoringService = new MonitoringService();
-    this.aiService = new AIEnhancedExtractionService();
+    // Use singleton instances to prevent memory leaks
+    this.queueService = require('./queueService');
+    this.cacheService = require('./cacheService');
+    this.monitoringService = require('./monitoringService');
+    this.aiService = require('./aiEnhancedExtractionService');
     
     this.processingStats = {
       totalJobs: 0,
