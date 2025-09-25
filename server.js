@@ -220,7 +220,7 @@ const initializeServer = async () => {
     console.log('🔐 Security monitoring initialized');
     
     // Start the server
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Enhanced Secure Backend Server running on port ${PORT}`);
       console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'Not configured'}`);
       console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
