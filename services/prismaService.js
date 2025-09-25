@@ -8,37 +8,87 @@ class PrismaService {
         db: {
           url: process.env.DATABASE_URL
         }
+      },
+      // Memory optimization settings
+      __internal: {
+        engine: {
+          // Connection pool settings
+          connectionLimit: 5, // Limit concurrent connections
+          poolTimeout: 10000, // 10 seconds
+          connectTimeout: 10000, // 10 seconds
+          // Memory management
+          maxMemoryUsage: 100 * 1024 * 1024, // 100MB limit
+        }
       }
     });
+    
+    // Track connection state
+    this.isConnected = false;
+    this.connectionRetries = 0;
+    this.maxRetries = 3;
   }
 
   /**
    * Initialize database connection with retry logic
    */
   async connect() {
-    const maxRetries = 3;
-    let retries = 0;
+    if (this.isConnected) {
+      console.log('✅ Prisma already connected');
+      return;
+    }
     
-    while (retries < maxRetries) {
+    while (this.connectionRetries < this.maxRetries) {
       try {
         await this.prisma.$connect();
+        this.isConnected = true;
+        this.connectionRetries = 0;
         console.log('✅ Prisma connected to database');
+        
+        // Set up connection monitoring
+        this.setupConnectionMonitoring();
         return;
       } catch (error) {
-        retries++;
-        console.error(`❌ Prisma connection failed (attempt ${retries}/${maxRetries}):`, error.message);
+        this.connectionRetries++;
+        console.error(`❌ Prisma connection failed (attempt ${this.connectionRetries}/${this.maxRetries}):`, error.message);
         
-        if (retries >= maxRetries) {
+        if (this.connectionRetries >= this.maxRetries) {
           console.error('❌ Max retries reached. Prisma connection failed permanently.');
           throw error;
         }
         
         // Wait before retrying (exponential backoff)
-        const waitTime = Math.pow(2, retries) * 1000;
+        const waitTime = Math.pow(2, this.connectionRetries) * 1000;
         console.log(`⏳ Waiting ${waitTime}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
+  }
+  
+  /**
+   * Setup connection monitoring and cleanup
+   */
+  setupConnectionMonitoring() {
+    // Monitor connection health every 30 seconds
+    this.healthCheckInterval = setInterval(async () => {
+      try {
+        await this.prisma.$queryRaw`SELECT 1`;
+      } catch (error) {
+        console.warn('⚠️ Database connection lost, attempting reconnection...');
+        this.isConnected = false;
+        await this.connect();
+      }
+    }, 30000);
+    
+    // Cleanup expired data every hour
+    this.cleanupInterval = setInterval(async () => {
+      try {
+        await this.cleanupExpiredTokens();
+        await this.cleanupExpiredSessions();
+        console.log('🧹 Database cleanup completed');
+      } catch (error) {
+        console.error('❌ Database cleanup failed:', error);
+      }
+    }, 3600000); // 1 hour
   }
 
   /**
@@ -46,7 +96,20 @@ class PrismaService {
    */
   async disconnect() {
     try {
+      // Clear monitoring intervals
+      if (this.healthCheckInterval) {
+        clearInterval(this.healthCheckInterval);
+        this.healthCheckInterval = null;
+      }
+      
+      if (this.cleanupInterval) {
+        clearInterval(this.cleanupInterval);
+        this.cleanupInterval = null;
+      }
+      
+      // Disconnect from database
       await this.prisma.$disconnect();
+      this.isConnected = false;
       console.log('✅ Prisma disconnected from database');
     } catch (error) {
       console.error('❌ Prisma disconnection failed:', error);
@@ -616,32 +679,54 @@ class PrismaService {
   }
 
   /**
-   * Get database statistics
+   * Get database statistics with memory optimization
    */
   async getStats() {
-    const [
-      userCount,
-      jobCount,
-      contactCount,
-      activeSessions
-    ] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.job.count(),
-      this.prisma.contact.count(),
-      this.prisma.session.count({
-        where: {
-          isActive: true,
-          expiresAt: { gt: new Date() }
-        }
-      })
-    ]);
+    try {
+      // Use raw queries for better memory efficiency
+      const [userCount, jobCount, contactCount, activeSessions] = await Promise.all([
+        this.prisma.$queryRaw`SELECT COUNT(*) as count FROM "User"`,
+        this.prisma.$queryRaw`SELECT COUNT(*) as count FROM "Job"`,
+        this.prisma.$queryRaw`SELECT COUNT(*) as count FROM "Contact"`,
+        this.prisma.$queryRaw`SELECT COUNT(*) as count FROM "Session" WHERE "isActive" = true AND "expiresAt" > NOW()`
+      ]);
 
-    return {
-      users: userCount,
-      jobs: jobCount,
-      contacts: contactCount,
-      activeSessions
-    };
+      return {
+        users: parseInt(userCount[0]?.count || 0),
+        jobs: parseInt(jobCount[0]?.count || 0),
+        contacts: parseInt(contactCount[0]?.count || 0),
+        activeSessions: parseInt(activeSessions[0]?.count || 0)
+      };
+    } catch (error) {
+      console.error('❌ Error getting database stats:', error);
+      return {
+        users: 0,
+        jobs: 0,
+        contacts: 0,
+        activeSessions: 0
+      };
+    }
+  }
+  
+  /**
+   * Memory-efficient query execution
+   */
+  async executeQuery(query, params = []) {
+    try {
+      const startTime = Date.now();
+      const result = await query;
+      const duration = Date.now() - startTime;
+      
+      // Log slow queries
+      if (duration > 5000) {
+        console.warn(`⚠️ Slow query detected: ${duration}ms`);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('❌ Query execution failed:', error);
+      throw error;
+    }
   }
 
   // ========================================

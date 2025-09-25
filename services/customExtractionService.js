@@ -230,26 +230,14 @@ class CustomExtractionService {
 
       console.log(`📄 PDF reported pages: ${pdf.numPages}`);
       
-      // Try to get actual page count by attempting to access pages
-      let actualPageCount = 0;
-      for (let i = 1; i <= Math.min(pdf.numPages, 50); i++) { // Limit to 50 pages max
+      // Memory optimization: Limit pages and add cleanup
+      const maxPages = Math.min(pdf.numPages, 20); // Reduced from 50 to 20
+      console.log(`📄 Processing max ${maxPages} pages for memory efficiency`);
+      
+      for (let i = 1; i <= maxPages; i++) {
+        let page = null;
         try {
-          await pdf.getPage(i);
-          actualPageCount = i;
-        } catch (error) {
-          console.log(`📄 Last accessible page: ${i - 1}`);
-          break;
-        }
-      }
-      
-      console.log(`📄 Actual accessible pages: ${actualPageCount}`);
-      
-      // Use the actual page count, not the reported one
-      const pagesToProcess = actualPageCount || Math.min(pdf.numPages, 10);
-      
-      for (let i = 1; i <= pagesToProcess; i++) {
-        try {
-          const page = await pdf.getPage(i);
+          page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           
           // Enhanced text extraction with better formatting
@@ -279,11 +267,29 @@ class CustomExtractionService {
           
           fullText += pageText + '\n';
           console.log(`📄 Page ${i} extracted: ${pageText.length} characters`);
+          
+          // Force cleanup of page object
+          page = null;
+          
+          // Force garbage collection every 5 pages
+          if (i % 5 === 0) {
+            if (global.gc) {
+              global.gc();
+            }
+          }
         } catch (pageError) {
           console.warn(`⚠️ Failed to extract text from page ${i}:`, pageError.message);
           // Continue with other pages
+        } finally {
+          // Ensure page is cleaned up
+          if (page) {
+            page = null;
+          }
         }
       }
+      
+      // Final cleanup
+      pdf.destroy();
 
       if (fullText.trim().length === 0) {
         throw new Error('No text content found in PDF');

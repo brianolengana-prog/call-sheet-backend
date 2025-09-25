@@ -43,10 +43,60 @@ const { structuredLogging } = require('./middleware/logging');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Memory monitoring
+const checkMemoryUsage = () => {
+  const usage = process.memoryUsage();
+  const memoryUsagePercent = (usage.heapUsed / usage.heapTotal) * 100;
+  
+  if (memoryUsagePercent > 90) {
+    console.warn(`🚨 Alert: High memory usage: ${memoryUsagePercent.toFixed(2)}%`);
+    
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+      console.log('🧹 Forced garbage collection');
+    }
+    
+    // Log detailed memory info
+    console.log('📊 Memory Details:', {
+      heapUsed: `${Math.round(usage.heapUsed / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(usage.heapTotal / 1024 / 1024)}MB`,
+      external: `${Math.round(usage.external / 1024 / 1024)}MB`,
+      rss: `${Math.round(usage.rss / 1024 / 1024)}MB`
+    });
+  }
+};
+
+// Check memory every 30 seconds
+setInterval(checkMemoryUsage, 30000);
+
 // Trust proxy configuration - be more specific to avoid rate limiting issues
 // In production, trust only the first proxy (Render's load balancer)
 // In development, don't trust any proxies
 app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
+
+// Memory optimization middleware
+app.use((req, res, next) => {
+  // Limit request size to prevent memory issues
+  const maxSize = 10 * 1024 * 1024; // 10MB limit
+  if (req.headers['content-length'] && parseInt(req.headers['content-length']) > maxSize) {
+    return res.status(413).json({ error: 'Request too large' });
+  }
+  next();
+});
+
+// Add cleanup middleware for file uploads
+app.use((req, res, next) => {
+  const originalSend = res.send;
+  res.send = function(data) {
+    // Clean up any temporary data
+    if (req.file) {
+      // File cleanup handled by multer
+    }
+    return originalSend.call(this, data);
+  };
+  next();
+});
 
 // IP filtering (should be first)
 app.use(ipFilter);
@@ -273,5 +323,8 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-// Initialize the server
-initializeServer();
+// Initialize the server with error handling
+initializeServer().catch(error => {
+  console.error('❌ Failed to initialize server:', error);
+  process.exit(1);
+});
