@@ -730,32 +730,10 @@ Return the enhanced contacts in the same JSON format.`;
     };
   }
 
-  // Include existing text extraction methods from CustomExtractionService
+  // Delegate to the hardened CustomExtractionService
   async extractTextFromDocument(fileBuffer, mimeType, fileName) {
-    // Implementation from CustomExtractionService
-    if (mimeType === 'application/pdf') {
-      return await this.extractTextFromPDF(fileBuffer);
-    } else if (mimeType.includes('image/')) {
-      return await this.ocrProcessor.extractText(fileBuffer);
-    } else {
-      return fileBuffer.toString('utf8');
-    }
-  }
-
-  async extractTextFromPDF(fileBuffer) {
-    // Implementation from CustomExtractionService
-    const pdfjsLib = require('pdfjs-dist');
-    const pdf = await pdfjsLib.getDocument({ data: fileBuffer }).promise;
-    let fullText = '';
-    
-    for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map(item => item.str).join(' ');
-      fullText += pageText + '\n';
-    }
-    
-    return fullText;
+    const CustomExtractionService = require('./customExtractionService');
+    return await CustomExtractionService.extractTextFromDocument(fileBuffer, mimeType, fileName);
   }
 
   /**
