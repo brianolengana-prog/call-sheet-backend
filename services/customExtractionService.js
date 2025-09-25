@@ -326,8 +326,9 @@ class CustomExtractionService {
         continue;
       }
 
-      // Check for similar name match (fuzzy matching)
+      // Check for similar name match (fuzzy matching) - only for very similar names
       if (name && this.isSimilarName(name, Array.from(seenNames))) {
+        // Only skip if it's a very close match (95% similarity) to avoid false positives
         continue;
       }
 
@@ -346,7 +347,7 @@ class CustomExtractionService {
   isSimilarName(name, existingNames) {
     for (const existingName of existingNames) {
       const similarity = this.calculateStringSimilarity(name, existingName);
-      if (similarity > 0.8) { // 80% similarity threshold
+      if (similarity > 0.95) { // 95% similarity threshold - only remove very close matches
         return true;
       }
     }

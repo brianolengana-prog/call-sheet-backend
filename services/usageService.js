@@ -150,7 +150,7 @@ class UsageService {
           updateData.aiMinutesUsed = usage.aiMinutesUsed + amount;
           break;
         case 'api_call':
-          updateData.apiCallsUsed = usage.apiCallsUsed + amount;
+          updateData.apiCalls = usage.apiCalls + amount;
           break;
         case 'storage':
           updateData.storageUsedGB = usage.storageUsedGB + amount;
