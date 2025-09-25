@@ -733,7 +733,8 @@ Return the enhanced contacts in the same JSON format.`;
   // Delegate to the hardened CustomExtractionService
   async extractTextFromDocument(fileBuffer, mimeType, fileName) {
     const CustomExtractionService = require('./customExtractionService');
-    return await CustomExtractionService.extractTextFromDocument(fileBuffer, mimeType, fileName);
+    const service = new CustomExtractionService();
+    return await service.extractTextFromDocument(fileBuffer, mimeType, fileName);
   }
 
   /**
