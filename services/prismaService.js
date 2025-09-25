@@ -8,17 +8,6 @@ class PrismaService {
         db: {
           url: process.env.DATABASE_URL
         }
-      },
-      // Memory optimization settings
-      __internal: {
-        engine: {
-          // Connection pool settings
-          connectionLimit: 2, // Reduced from 5 to 2 for memory efficiency
-          poolTimeout: 5000, // 5 seconds
-          connectTimeout: 5000, // 5 seconds
-          // Memory management
-          maxMemoryUsage: 50 * 1024 * 1024, // 50MB limit
-        }
       }
     });
     
@@ -35,6 +24,16 @@ class PrismaService {
     if (this.isConnected) {
       console.log('✅ Prisma already connected');
       return;
+    }
+    
+    // Set connection pool limits via environment variables
+    process.env.DATABASE_CONNECTION_LIMIT = '2';
+    process.env.DATABASE_POOL_TIMEOUT = '5000';
+    
+    // Modify DATABASE_URL to include connection limits
+    if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('pool_timeout')) {
+      const separator = process.env.DATABASE_URL.includes('?') ? '&' : '?';
+      process.env.DATABASE_URL = `${process.env.DATABASE_URL}${separator}pool_timeout=5&connection_limit=2`;
     }
     
     while (this.connectionRetries < this.maxRetries) {

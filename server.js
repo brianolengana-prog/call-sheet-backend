@@ -43,6 +43,11 @@ const { structuredLogging } = require('./middleware/logging');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Log port configuration for debugging
+console.log(`🔧 Port configuration: ${PORT}`);
+console.log(`🔧 Environment: ${process.env.NODE_ENV}`);
+console.log(`🔧 Process env PORT: ${process.env.PORT}`);
+
 // Memory monitoring
 const checkMemoryUsage = () => {
   const usage = process.memoryUsage();
@@ -219,7 +224,9 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     memory: process.memoryUsage(),
-    version: '1.0.0'
+    version: '1.0.0',
+    port: PORT,
+    environment: process.env.NODE_ENV
   });
 });
 
@@ -270,7 +277,7 @@ const initializeServer = async () => {
     console.log('🔐 Security monitoring initialized');
     
     // Start the server
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Enhanced Secure Backend Server running on port ${PORT}`);
       console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'Not configured'}`);
       console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -278,6 +285,17 @@ const initializeServer = async () => {
       console.log(`📡 Webhook Mode: ${process.env.NODE_ENV === 'production' ? 'Production' : 'Development (manual sync enabled)'}`);
       console.log(`🛡️  Security Features: ✅ Authentication ✅ Rate Limiting ✅ CSRF Protection ✅ Session Management`);
       console.log(`📊 Logging: Authentication events, Security incidents, Rate limiting`);
+      console.log(`✅ Server successfully bound to port ${PORT} on 0.0.0.0`);
+      console.log(`🌐 Server accessible at: http://0.0.0.0:${PORT}`);
+    });
+
+    // Handle server errors
+    server.on('error', (error) => {
+      console.error('❌ Server error:', error);
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`);
+        process.exit(1);
+      }
     });
     
   } catch (error) {
