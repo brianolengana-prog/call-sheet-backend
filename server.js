@@ -21,6 +21,7 @@ const stripeEnhancedRoutes = require('./routes/stripeEnhanced');
 const contactsRoutes = require('./routes/contacts');
 const customExtractionRoutes = require('./routes/customExtraction');
 const optimizedExtractionRoutes = require('./routes/optimizedExtraction');
+const smartExtractionRoutes = require('./routes/smartExtraction');
 const apiKeyRoutes = require('./routes/apiKeys');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
@@ -190,6 +191,7 @@ app.use('/api/contacts', apiRateLimit, contactsRoutes);
 app.use('/api/jobs', apiRateLimit, contactsRoutes); // Jobs are handled by contacts route
 app.use('/api/custom-extraction', apiRateLimit, customExtractionRoutes);
 app.use('/api/optimized-extraction', apiRateLimit, optimizedExtractionRoutes);
+app.use('/api/smart-extraction', apiRateLimit, smartExtractionRoutes);
 app.use('/api/api-keys', apiRateLimit, apiKeyRoutes);
 
 // 404 handler

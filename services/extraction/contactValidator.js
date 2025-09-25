@@ -23,7 +23,7 @@ class ContactValidator {
         weight: 0.2
       },
       name: {
-        pattern: /^[A-Z][a-z]+ [A-Z][a-z]+(?:\s[A-Z][a-z]+)?$/,
+        pattern: /^[A-Z][a-z]+(?:\s[A-Z][a-z]+){1,3}$/,
         required: true,
         weight: 0.3
       },

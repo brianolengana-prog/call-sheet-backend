@@ -14,9 +14,13 @@ class PatternExtractor {
     return {
       email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
       phone: /(\+?[\d\s\-\(\)]{10,})/g,
-      name: /\b[A-Z][a-z]+ [A-Z][a-z]+(?:\s[A-Z][a-z]+)?\b/g,
+      // Improved name pattern - more specific for call sheets
+      name: /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+){1,2}(?:\s[A-Z][a-z]+)?\b/g,
       company: /(?:at|from|@)\s+([A-Za-z\s&]+)/gi,
-      role: /\b(Director|Producer|Manager|Coordinator|Assistant|Editor|Cinematographer|Sound|Lighting|Grip|Electric|Camera|Audio|Wardrobe|Makeup|Hair|Transportation|Catering|Writer|Actor|Actress|Talent|Crew|Staff|Team|Personnel)\b/gi
+      // Enhanced role patterns for call sheets
+      role: /\b(Director|Producer|Manager|Coordinator|Assistant|Editor|Cinematographer|Sound|Lighting|Grip|Electric|Camera|Audio|Wardrobe|Makeup|Hair|Transportation|Catering|Writer|Actor|Actress|Talent|Crew|Staff|Team|Personnel|HMU|1st AC|2nd AC|BBE|BBG|Key Grip|Swing|Stylist|Set Designer|Art Director|Head Of Creative|Program Manager|Sales|Talent|Amazon|Cosmopolitan|Hearst|Omnicom)\b/gi,
+      // Call sheet specific patterns
+      callSheetRole: /\b(Editor in Chief|Head Of Creative|Director|Art Director|Producer|Coordinator|Program Manager|Sales|Talent|HMU|Assistant|Set Designer|Stylist|Director of Photography|1st AC|2nd AC|Gaffer|BBE|Swing: Electric|Key Grip|BBG|Swing: Grip|Audio Tech)\b/gi
     };
   }
 
@@ -117,6 +121,14 @@ class PatternExtractor {
   }
 
   extractNameNearEmail(email, line, allLines, lineIndex) {
+    // For call sheets, try to extract name from the line structure
+    if (this.isCallSheetFormat(line, allLines, lineIndex)) {
+      const callSheetName = this.extractCallSheetName(email, line, allLines, lineIndex);
+      if (callSheetName && this.isValidName(callSheetName)) {
+        return callSheetName;
+      }
+    }
+    
     // Look for names in the same line
     const nameMatches = [...line.matchAll(this.patterns.name)];
     for (const match of nameMatches) {
@@ -164,20 +176,37 @@ class PatternExtractor {
   }
 
   extractRoleNearEmail(email, line, allLines, lineIndex) {
+    // First try call sheet specific roles
+    const callSheetRoleMatches = [...line.matchAll(this.patterns.callSheetRole)];
+    if (callSheetRoleMatches.length > 0) {
+      return callSheetRoleMatches[0][0];
+    }
+    
+    // Then try general roles
     const roleMatches = [...line.matchAll(this.patterns.role)];
     if (roleMatches.length > 0) {
       return roleMatches[0][0];
     }
     
-    // Look in nearby lines
+    // Look in nearby lines for call sheet roles
     for (let i = Math.max(0, lineIndex - 1); i <= Math.min(allLines.length - 1, lineIndex + 1); i++) {
       if (i === lineIndex) continue;
       
       const nearbyLine = allLines[i];
+      const callSheetRoleMatches = [...nearbyLine.matchAll(this.patterns.callSheetRole)];
+      if (callSheetRoleMatches.length > 0) {
+        return callSheetRoleMatches[0][0];
+      }
+      
       const roleMatches = [...nearbyLine.matchAll(this.patterns.role)];
       if (roleMatches.length > 0) {
         return roleMatches[0][0];
       }
+    }
+    
+    // For call sheets, try to infer role from context
+    if (this.isCallSheetFormat(line, allLines, lineIndex)) {
+      return this.inferCallSheetRole(email, line, allLines, lineIndex);
     }
     
     return 'Contact';
@@ -235,12 +264,93 @@ class PatternExtractor {
     if (!name || name.length < 3) return false;
     
     // Check if it's not a common word
-    const commonWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'production', 'company', 'inc', 'llc', 'corp'];
+    const commonWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'production', 'company', 'inc', 'llc', 'corp', 'self', 'transportation', 'amazon', 'cosmopolitan', 'hearst', 'omnicom'];
     if (commonWords.includes(name.toLowerCase())) return false;
     
     // Check if it has proper capitalization
     const words = name.split(' ');
     return words.every(word => word[0] === word[0].toUpperCase() && word.length > 1);
+  }
+
+  isCallSheetFormat(line, allLines, lineIndex) {
+    // Check if this looks like a call sheet format
+    const callSheetIndicators = [
+      'TALENT NAME', 'CONTACT', 'CELL', 'TRANSPORTATION', 'CALL', 'LOCATION',
+      'NAME CONTACT', 'VIDEO NAME', 'GLAM NAME', 'SET DESIGN NAME', 'WARDROBE NAME'
+    ];
+    
+    // Check current line and nearby lines for call sheet indicators
+    for (let i = Math.max(0, lineIndex - 1); i <= Math.min(allLines.length - 1, lineIndex + 1); i++) {
+      const checkLine = allLines[i];
+      for (const indicator of callSheetIndicators) {
+        if (checkLine.includes(indicator)) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  extractCallSheetName(email, line, allLines, lineIndex) {
+    // For call sheets, the name is usually before the email
+    // Look for pattern: "Name Name email@domain.com"
+    const emailIndex = line.indexOf(email);
+    if (emailIndex > 0) {
+      const beforeEmail = line.substring(0, emailIndex).trim();
+      
+      // Try to extract name from the part before email
+      const nameMatches = [...beforeEmail.matchAll(this.patterns.name)];
+      for (const match of nameMatches) {
+        const name = match[0];
+        if (this.isValidName(name)) {
+          return name;
+        }
+      }
+      
+      // If no clear name pattern, try to extract from words before email
+      const words = beforeEmail.split(/\s+/).filter(word => word.length > 1);
+      if (words.length >= 2) {
+        // Take the last 2-3 words as potential name
+        const potentialName = words.slice(-2).join(' ');
+        if (this.isValidName(potentialName)) {
+          return potentialName;
+        }
+        
+        // Try 3 words if 2 doesn't work
+        if (words.length >= 3) {
+          const potentialName3 = words.slice(-3).join(' ');
+          if (this.isValidName(potentialName3)) {
+            return potentialName3;
+          }
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  inferCallSheetRole(email, line, allLines, lineIndex) {
+    // Look for section headers that might indicate role
+    for (let i = Math.max(0, lineIndex - 3); i <= Math.min(allLines.length - 1, lineIndex + 3); i++) {
+      const checkLine = allLines[i];
+      
+      // Check for section headers
+      if (checkLine.includes('VIDEO NAME')) return 'Video Crew';
+      if (checkLine.includes('GLAM NAME')) return 'Glamour';
+      if (checkLine.includes('SET DESIGN NAME')) return 'Set Design';
+      if (checkLine.includes('WARDROBE NAME')) return 'Wardrobe';
+      if (checkLine.includes('HEARST NAME')) return 'Hearst Staff';
+      if (checkLine.includes('AMAZON NAME')) return 'Amazon Staff';
+      if (checkLine.includes('TALENT NAME')) return 'Talent';
+    }
+    
+    // Check email domain for hints
+    if (email.includes('@hearst.com')) return 'Hearst Staff';
+    if (email.includes('@amazon.com')) return 'Amazon Staff';
+    if (email.includes('@omnicommediagroup.com')) return 'Omnicom Staff';
+    
+    return 'Crew Member';
   }
 
   postProcessContacts(contacts, documentAnalysis) {
@@ -261,11 +371,31 @@ class PatternExtractor {
     const seen = new Set();
     
     for (const contact of contacts) {
-      const key = `${contact.email || ''}-${contact.name || ''}`.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(contact);
+      // Only deduplicate if we have both email and name that are identical
+      const email = contact.email?.toLowerCase() || '';
+      const name = contact.name?.toLowerCase() || '';
+      
+      // Create a more specific key for deduplication
+      const key = `${email}-${name}`;
+      
+      // Only skip if we have an exact match with both email and name
+      if (email && name && seen.has(key)) {
+        continue;
       }
+      
+      // For contacts with only email or only name, be more lenient
+      if (email && seen.has(email)) {
+        continue;
+      }
+      
+      if (name && name !== 'unknown' && seen.has(name)) {
+        continue;
+      }
+      
+      seen.add(key);
+      if (email) seen.add(email);
+      if (name && name !== 'unknown') seen.add(name);
+      unique.push(contact);
     }
     
     return unique;
