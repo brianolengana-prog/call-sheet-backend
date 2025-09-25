@@ -208,22 +208,11 @@ Provide detailed analysis in JSON format:
     }
 
     try {
-      const prompt = `You are a document preprocessing expert. Clean and structure this call sheet text for optimal contact extraction:
+      const prompt = `Clean and structure this call sheet text for contact extraction:
 
-Original Text:
 ${baseText}
 
-Document Analysis:
-${JSON.stringify(documentAnalysis, null, 2)}
-
-Please:
-1. Fix OCR errors and formatting issues
-2. Standardize contact information format
-3. Structure contact sections clearly
-4. Preserve ALL contact details
-5. Return only the cleaned and structured text
-
-Cleaned Text:`;
+Return only the cleaned text:`;
 
       const response = await this.openai.chat.completions.create({
         model: "gpt-4",
@@ -252,51 +241,41 @@ Cleaned Text:`;
     }
 
     try {
-      const prompt = `You are a contact extraction expert. Extract ALL contacts from this call sheet text:
+      // Smart text chunking to avoid token limits
+      const textChunks = this.chunkTextForAI(text, 3000);
+      let allAIContacts = [];
+      
+      for (let i = 0; i < textChunks.length; i++) {
+        const chunk = textChunks[i];
+        console.log(`🤖 Processing AI chunk ${i + 1}/${textChunks.length} (${chunk.length} chars)`);
+        
+        const prompt = `Extract contacts from this call sheet chunk:
 
-${text}
+${chunk}
 
-Document Analysis:
-${JSON.stringify(documentAnalysis, null, 2)}
+Return JSON array of contacts with: name, email, phone, role, company, confidence`;
 
-Extract contacts with this JSON format:
-[
-  {
-    "name": "Full Name",
-    "email": "email@domain.com",
-    "phone": "phone_number",
-    "role": "inferred_role",
-    "company": "inferred_company",
-    "confidence": 0.0-1.0
-  }
-]
+        const response = await this.openai.chat.completions.create({
+          model: "gpt-4",
+          messages: [
+            {
+              role: "system",
+              content: "You are an expert at extracting contacts from call sheets. Always return valid JSON array of contacts."
+            },
+            { role: "user", content: prompt }
+          ],
+          max_tokens: 2000,
+          temperature: 0.1
+        });
 
-Focus on:
-1. Finding ALL contacts (don't miss any)
-2. Accurate role inference from context
-3. Company inference from document structure
-4. High confidence scoring for quality contacts
+        const chunkContacts = JSON.parse(response.choices[0].message.content);
+        allAIContacts = allAIContacts.concat(chunkContacts);
+      }
 
-Return ALL contacts found:`;
-
-      const response = await this.openai.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert at extracting contacts from call sheets. Always return valid JSON array of contacts."
-          },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 4000,
-        temperature: 0.1
-      });
-
-      const aiContacts = JSON.parse(response.choices[0].message.content);
-      console.log('🤖 AI pattern extraction found:', aiContacts.length, 'contacts');
+      console.log('🤖 AI pattern extraction found:', allAIContacts.length, 'contacts');
       
       // Merge AI and custom results, removing duplicates
-      const mergedContacts = this.mergeContacts(customContacts, aiContacts);
+      const mergedContacts = this.mergeContacts(customContacts, allAIContacts);
       console.log('🔄 Merged contacts:', mergedContacts.length, 'contacts');
       
       return mergedContacts;
@@ -789,6 +768,33 @@ Return the enhanced contacts in the same JSON format.`;
     if (phone) return `phone:${phone}`;
     if (name) return `name:${name}`;
     return null;
+  }
+
+  /**
+   * Smart text chunking for AI processing
+   */
+  chunkTextForAI(text, maxChunkSize) {
+    const chunks = [];
+    const lines = text.split('\n');
+    let currentChunk = '';
+    
+    for (const line of lines) {
+      // If adding this line would exceed the limit, save current chunk
+      if (currentChunk.length + line.length > maxChunkSize && currentChunk.length > 0) {
+        chunks.push(currentChunk.trim());
+        currentChunk = line;
+      } else {
+        currentChunk += (currentChunk ? '\n' : '') + line;
+      }
+    }
+    
+    // Add the last chunk
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    console.log(`📄 Text chunked into ${chunks.length} pieces for AI processing`);
+    return chunks;
   }
 }
 

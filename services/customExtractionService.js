@@ -250,14 +250,8 @@ class CustomExtractionService {
       console.log(`📄 Actual accessible pages: ${actualPageCount}`);
       
       // Memory optimization: Limit pages and add cleanup
-      const maxPages = Math.min(actualPageCount, 5); // Process max 5 pages
+      const maxPages = Math.min(actualPageCount, 2); // Process max 2 pages for memory
       console.log(`📄 Processing max ${maxPages} pages for memory efficiency`);
-      
-      // Check memory before processing
-      if (process.memoryUsage().heapUsed / process.memoryUsage().heapTotal > 0.9) {
-        console.warn('⚠️ High memory usage detected, reducing page limit');
-        const maxPages = Math.min(actualPageCount, 3);
-      }
       
       for (let i = 1; i <= maxPages; i++) {
         let page = null;
@@ -265,7 +259,7 @@ class CustomExtractionService {
           // Check memory before each page
           const memUsage = process.memoryUsage();
           const memPercent = memUsage.heapUsed / memUsage.heapTotal;
-          if (memPercent > 0.95) {
+          if (memPercent > 0.90) {
             console.warn(`⚠️ Memory usage too high (${(memPercent * 100).toFixed(1)}%), stopping PDF processing`);
             break;
           }
