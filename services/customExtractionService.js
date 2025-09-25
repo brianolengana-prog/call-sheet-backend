@@ -149,7 +149,18 @@ class CustomExtractionService {
     try {
       switch (mimeType) {
         case 'application/pdf':
-          return await this.extractTextFromPDF(fileBuffer);
+          try {
+            return await this.extractTextFromPDF(fileBuffer);
+          } catch (pdfError) {
+            console.warn('⚠️ PDF extraction failed, trying fallback method...');
+            // Try to extract as plain text as fallback
+            try {
+              return fileBuffer.toString('utf8');
+            } catch (fallbackError) {
+              console.error('❌ PDF fallback extraction also failed:', fallbackError);
+              throw pdfError; // Throw original PDF error
+            }
+          }
         case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
           return await this.extractTextFromDOCX(fileBuffer);
         case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
@@ -197,14 +208,36 @@ class CustomExtractionService {
         data = new Uint8Array(fileBuffer);
       }
 
-      const pdf = await this.pdfjs.getDocument({ data }).promise;
+      // Try with different PDF.js options for better compatibility
+      const loadingTask = this.pdfjs.getDocument({
+        data: data,
+        verbosity: 0, // Reduce console output
+        disableAutoFetch: true,
+        disableStream: true,
+        disableRange: true,
+        // Add fallback options for problematic PDFs
+        cMapUrl: null,
+        cMapPacked: false,
+        standardFontDataUrl: null
+      });
+      
+      const pdf = await loadingTask.promise;
       let fullText = '';
 
       for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => item.str).join(' ');
-        fullText += pageText + '\n';
+        try {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          fullText += pageText + '\n';
+        } catch (pageError) {
+          console.warn(`⚠️ Failed to extract text from page ${i}:`, pageError.message);
+          // Continue with other pages
+        }
+      }
+
+      if (fullText.trim().length === 0) {
+        throw new Error('No text content found in PDF');
       }
 
       return fullText;
