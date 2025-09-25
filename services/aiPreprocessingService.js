@@ -1,14 +1,36 @@
-const { OpenAI } = require('openai');
-
 class AIPreprocessingService {
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
-    });
+    // Check if OpenAI is available
+    try {
+      const { OpenAI } = require('openai');
+      this.openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY
+      });
+      this.isAvailable = true;
+      console.log('✅ AI Preprocessing Service initialized with OpenAI');
+    } catch (error) {
+      console.warn('⚠️ AI Preprocessing Service: OpenAI not available, running in fallback mode');
+      this.openai = null;
+      this.isAvailable = false;
+    }
   }
 
   async preprocessDocument(text, documentAnalysis) {
     console.log('🤖 Starting AI document preprocessing...');
+    
+    // If OpenAI is not available, return basic preprocessing
+    if (!this.isAvailable || !this.openai) {
+      console.log('⚠️ AI preprocessing unavailable, returning basic preprocessing');
+      return {
+        sections: [{
+          name: 'general',
+          contacts: [],
+          raw_text: text
+        }],
+        normalized_text: text,
+        document_structure: 'basic'
+      };
+    }
     
     try {
       const prompt = `You are a document preprocessing expert. Analyze this call sheet text and:
@@ -74,6 +96,12 @@ Return a JSON response with:
 
   async enhanceExtractionResults(contacts, documentAnalysis) {
     console.log('🤖 Starting AI enhancement of extraction results...');
+    
+    // If OpenAI is not available, return original contacts
+    if (!this.isAvailable || !this.openai) {
+      console.log('⚠️ AI enhancement unavailable, returning original contacts');
+      return contacts;
+    }
     
     try {
       const prompt = `You are a contact information enhancement expert. Review these extracted contacts and:
