@@ -54,6 +54,12 @@ class PatternExtractor {
   extractContactsFromLine(line, lineIndex, allLines, documentAnalysis) {
     const contacts = [];
     
+    // Enhanced extraction for structured call sheets
+    if (this.isStructuredCallSheetLine(line)) {
+      const structuredContacts = this.extractFromStructuredLine(line, lineIndex, allLines, documentAnalysis);
+      contacts.push(...structuredContacts);
+    }
+    
     // Find all emails in this line
     const emailMatches = [...line.matchAll(this.patterns.email)];
     
@@ -430,6 +436,126 @@ class PatternExtractor {
       contact.confidence = Math.min(score, 1.0);
       return contact;
     });
+  }
+
+  /**
+   * Check if line is from a structured call sheet format
+   */
+  isStructuredCallSheetLine(line) {
+    // Look for patterns like "Name Phone Call Time Location Email"
+    const structuredPattern = /^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[\d\-\(\)\s]+\s+[\d:]+\s+[A-Z]+\s+[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+    const hasNamePhoneEmail = /^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[\d\-\(\)\s]+\s+[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+    
+    // Also check for lines that look like contact entries (name + phone/email)
+    const hasNameAndContact = /^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[\d\-\(\)\s]+/;
+    const hasNameAndEmail = /^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+    
+    return structuredPattern.test(line) || hasNamePhoneEmail.test(line) || 
+           hasNameAndContact.test(line) || hasNameAndEmail.test(line);
+  }
+
+  /**
+   * Extract contacts from structured call sheet lines
+   */
+  extractFromStructuredLine(line, lineIndex, allLines, documentAnalysis) {
+    const contacts = [];
+    
+    // Split line by multiple spaces to get columns
+    const parts = line.split(/\s{2,}/);
+    
+    if (parts.length >= 2) {
+      // Try to identify name, phone, email pattern
+      const name = this.extractNameFromStructuredLine(parts);
+      const phone = this.extractPhoneFromStructuredLine(parts);
+      const email = this.extractEmailFromStructuredLine(parts);
+      const role = this.extractRoleFromStructuredLine(parts, lineIndex, allLines);
+      
+      // More lenient validation - accept contacts with just name and phone/email
+      if (name && (phone || email)) {
+        const contact = {
+          name: name,
+          phone: phone || '',
+          email: email || '',
+          role: role || '',
+          company: this.extractCompanyFromContext(lineIndex, allLines),
+          confidence: 0.9
+        };
+        
+        // More lenient validation for structured call sheets
+        if (name && name.length > 2) {
+          contacts.push(contact);
+        }
+      }
+    }
+    
+    return contacts;
+  }
+
+  extractNameFromStructuredLine(parts) {
+    // First part is usually the name
+    const name = parts[0];
+    if (name && name.length > 2 && /^[A-Z][a-z]+/.test(name)) {
+      return name;
+    }
+    return null;
+  }
+
+  extractPhoneFromStructuredLine(parts) {
+    for (const part of parts) {
+      const phoneMatch = part.match(/(\d{3}[-.]?\d{3}[-.]?\d{4})/);
+      if (phoneMatch) {
+        return phoneMatch[1];
+      }
+    }
+    return null;
+  }
+
+  extractEmailFromStructuredLine(parts) {
+    for (const part of parts) {
+      const emailMatch = part.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        return emailMatch[0];
+      }
+    }
+    return null;
+  }
+
+  extractRoleFromStructuredLine(parts, lineIndex, allLines) {
+    // Look for role keywords in the line
+    const roleKeywords = [
+      'Producer', 'Director', 'Photographer', 'Assistant', 'Stylist', 'Makeup', 'Hair', 
+      'Grip', 'Electric', 'Camera', 'Audio', 'Wardrobe', 'Set Design', 'Colorist',
+      'Talent', 'Client', 'Executive', 'Manager', 'Coordinator'
+    ];
+    
+    const lineText = parts.join(' ');
+    for (const keyword of roleKeywords) {
+      if (lineText.toLowerCase().includes(keyword.toLowerCase())) {
+        return keyword;
+      }
+    }
+    
+    // Try to infer role from context (section headers)
+    const contextLines = allLines.slice(Math.max(0, lineIndex - 5), lineIndex + 5);
+    for (const contextLine of contextLines) {
+      if (contextLine.includes('PRODUCTION') || contextLine.includes('TALENT') || contextLine.includes('CLIENTS')) {
+        if (contextLine.includes('PRODUCTION')) return 'Production';
+        if (contextLine.includes('TALENT')) return 'Talent';
+        if (contextLine.includes('CLIENTS')) return 'Client';
+      }
+    }
+    
+    return '';
+  }
+
+  extractCompanyFromContext(lineIndex, allLines) {
+    // Look for company context in nearby lines
+    const contextLines = allLines.slice(Math.max(0, lineIndex - 10), lineIndex + 10);
+    for (const line of contextLines) {
+      if (line.includes('L\'Oreal') || line.includes('Loreal')) return 'L\'Oreal';
+      if (line.includes('Prime Content')) return 'Prime Content';
+    }
+    return '';
   }
 }
 

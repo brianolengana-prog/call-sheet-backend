@@ -148,6 +148,15 @@ class SmartExtractionRouter {
       analysis.type = 'document';
     }
     
+    // Enhanced call sheet detection
+    if (text.toLowerCase().includes('call sheet') || 
+        text.toLowerCase().includes('production') ||
+        text.toLowerCase().includes('talent') ||
+        text.toLowerCase().includes('crew')) {
+      analysis.type = 'call_sheet';
+      analysis.hasContactSections = true;
+    }
+    
     // Analyze text patterns
     const textLower = text.toLowerCase();
     
@@ -173,7 +182,27 @@ class SmartExtractionRouter {
     
     // Estimate contact count
     const emailMatches = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-    analysis.estimatedContacts = emailMatches.length;
+    const phoneMatches = text.match(/\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g) || [];
+    const nameMatches = text.match(/\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/g) || [];
+    
+    // Enhanced contact estimation for call sheets
+    if (analysis.type === 'call_sheet') {
+      // Look for structured lines with names and contact info
+      const structuredLines = text.split('\n').filter(line => {
+        const hasName = /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(line.trim());
+        const hasContact = /[\d\-\(\)\s]{10,}|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(line);
+        return hasName && hasContact;
+      });
+      
+      analysis.estimatedContacts = Math.max(
+        emailMatches.length, 
+        phoneMatches.length, 
+        structuredLines.length,
+        Math.floor(nameMatches.length / 2)
+      );
+    } else {
+      analysis.estimatedContacts = Math.max(emailMatches.length, phoneMatches.length);
+    }
     
     // Determine complexity
     if (analysis.estimatedContacts > 50) {
@@ -235,6 +264,15 @@ class SmartExtractionRouter {
     }
     
     if (documentAnalysis.structure === 'tabular' || documentAnalysis.type === 'spreadsheet') {
+      // Use hybrid extraction for call sheets with many contacts or complex patterns
+      if (documentAnalysis.type === 'call_sheet' && documentAnalysis.estimatedContacts > 20) {
+        return {
+          method: 'hybrid',
+          reason: 'complex_call_sheet',
+          confidence: 0.9
+        };
+      }
+      
       return {
         method: 'custom',
         reason: 'tabular_data',
@@ -244,7 +282,7 @@ class SmartExtractionRouter {
     
     if (documentAnalysis.complexity === 'high' || documentAnalysis.estimatedContacts > 30) {
       return {
-        method: 'ai',
+        method: 'hybrid',
         reason: 'complex_document',
         confidence: 0.8
       };
