@@ -22,6 +22,7 @@ const contactsRoutes = require('./routes/contacts');
 const customExtractionRoutes = require('./routes/customExtraction');
 const optimizedExtractionRoutes = require('./routes/optimizedExtraction');
 const smartExtractionRoutes = require('./routes/smartExtraction');
+const newOptimizedExtractionRoutes = require('./routes/newOptimizedExtraction');
 const apiKeyRoutes = require('./routes/apiKeys');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
@@ -267,6 +268,7 @@ app.use('/api/jobs', apiRateLimit, contactsRoutes); // Jobs are handled by conta
 app.use('/api/custom-extraction', apiRateLimit, customExtractionRoutes);
 app.use('/api/optimized-extraction', apiRateLimit, optimizedExtractionRoutes);
 app.use('/api/smart-extraction', apiRateLimit, smartExtractionRoutes);
+app.use('/api/new-optimized-extraction', apiRateLimit, newOptimizedExtractionRoutes);
 app.use('/api/api-keys', apiRateLimit, apiKeyRoutes);
 
 // 404 handler
