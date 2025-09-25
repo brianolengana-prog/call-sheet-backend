@@ -70,6 +70,24 @@ const checkMemoryUsage = () => {
       rss: `${Math.round(usage.rss / 1024 / 1024)}MB`
     });
   }
+  
+  // Additional cleanup for PDF processing
+  if (memoryUsagePercent > 85) {
+    console.log('🧹 Performing additional memory cleanup for PDF processing...');
+    
+    // Clear any cached data
+    if (global.gc) {
+      global.gc();
+    }
+    
+    // Log memory usage by component
+    console.log('📊 Memory breakdown:', {
+      heapUsed: Math.round(usage.heapUsed / 1024 / 1024) + 'MB',
+      heapTotal: Math.round(usage.heapTotal / 1024 / 1024) + 'MB',
+      external: Math.round(usage.external / 1024 / 1024) + 'MB',
+      rss: Math.round(usage.rss / 1024 / 1024) + 'MB'
+    });
+  }
 };
 
 // Check memory every 30 seconds
@@ -266,6 +284,17 @@ app.use(errorHandler);
 // Startup routine
 const initializeServer = async () => {
   try {
+    // Validate database configuration
+    if (!process.env.DATABASE_URL) {
+      throw new Error('❌ DATABASE_URL environment variable is required');
+    }
+    
+    if (!process.env.DATABASE_URL.startsWith('postgresql://') && !process.env.DATABASE_URL.startsWith('postgres://')) {
+      throw new Error('❌ DATABASE_URL must start with postgresql:// or postgres://');
+    }
+    
+    console.log('✅ Database URL configured:', process.env.DATABASE_URL.substring(0, 20) + '...');
+    
     // Initialize Prisma database connection
     console.log('🔌 Connecting to database...');
     await prismaService.connect();

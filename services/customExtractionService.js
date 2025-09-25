@@ -230,17 +230,50 @@ class CustomExtractionService {
 
       console.log(`📄 PDF reported pages: ${pdf.numPages}`);
       
+      // Fix for PDF.js misreporting page count - try to access pages to find actual count
+      let actualPageCount = pdf.numPages;
+      try {
+        // Test if we can actually access the reported pages
+        for (let testPage = 1; testPage <= Math.min(pdf.numPages, 5); testPage++) {
+          try {
+            await pdf.getPage(testPage);
+          } catch (pageError) {
+            console.warn(`⚠️ Cannot access page ${testPage}, actual page count might be ${testPage - 1}`);
+            actualPageCount = testPage - 1;
+            break;
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Error testing page access, using reported count');
+      }
+      
+      console.log(`📄 Actual accessible pages: ${actualPageCount}`);
+      
       // Memory optimization: Limit pages and add cleanup
-      const maxPages = Math.min(pdf.numPages, 20); // Reduced from 50 to 20
+      const maxPages = Math.min(actualPageCount, 5); // Process max 5 pages
       console.log(`📄 Processing max ${maxPages} pages for memory efficiency`);
+      
+      // Check memory before processing
+      if (process.memoryUsage().heapUsed / process.memoryUsage().heapTotal > 0.9) {
+        console.warn('⚠️ High memory usage detected, reducing page limit');
+        const maxPages = Math.min(actualPageCount, 3);
+      }
       
       for (let i = 1; i <= maxPages; i++) {
         let page = null;
         try {
+          // Check memory before each page
+          const memUsage = process.memoryUsage();
+          const memPercent = memUsage.heapUsed / memUsage.heapTotal;
+          if (memPercent > 0.95) {
+            console.warn(`⚠️ Memory usage too high (${(memPercent * 100).toFixed(1)}%), stopping PDF processing`);
+            break;
+          }
+          
           page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           
-          // Enhanced text extraction with better formatting
+          // Enhanced text extraction with better formatting for call sheets
           let pageText = '';
           let currentY = null;
           let lineText = '';
@@ -264,6 +297,12 @@ class CustomExtractionService {
           if (lineText.trim()) {
             pageText += lineText.trim() + '\n';
           }
+          
+          // Enhanced formatting for call sheet structure
+          pageText = pageText
+            .replace(/\s+/g, ' ') // Normalize whitespace
+            .replace(/\n\s*\n/g, '\n') // Remove empty lines
+            .trim();
           
           fullText += pageText + '\n';
           console.log(`📄 Page ${i} extracted: ${pageText.length} characters`);
@@ -304,7 +343,73 @@ class CustomExtractionService {
       return fullText;
     } catch (error) {
       console.error('❌ PDF extraction failed:', error);
+      
+      // Fallback: Try to extract text using a different method
+      try {
+        console.log('🔄 Attempting fallback text extraction...');
+        const fallbackText = await this.extractTextFromPDFFallback(fileBuffer);
+        if (fallbackText && fallbackText.length > 100) {
+          console.log('✅ Fallback extraction successful:', fallbackText.length, 'characters');
+          return fallbackText;
+        }
+      } catch (fallbackError) {
+        console.error('❌ Fallback extraction also failed:', fallbackError);
+      }
+      
       throw new Error(`PDF text extraction failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fallback PDF text extraction method
+   */
+  async extractTextFromPDFFallback(fileBuffer) {
+    try {
+      console.log('🔄 Using fallback PDF extraction...');
+      
+      // Try with minimal PDF.js options
+      const loadingTask = this.pdfjs.getDocument({
+        data: new Uint8Array(fileBuffer),
+        verbosity: 0,
+        disableAutoFetch: true,
+        disableStream: true,
+        disableRange: true,
+        cMapUrl: null,
+        cMapPacked: false,
+        standardFontDataUrl: null,
+        // Minimal options for maximum compatibility
+        maxImageSize: 1024 * 1024,
+        isEvalSupported: false,
+        useSystemFonts: false
+      });
+      
+      const pdf = await loadingTask.promise;
+      let fullText = '';
+      
+      // Process only first 5 pages to avoid memory issues
+      const maxPages = Math.min(pdf.numPages, 5);
+      
+      for (let i = 1; i <= maxPages; i++) {
+        try {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          fullText += pageText + '\n';
+          
+          // Force cleanup
+          page.cleanup();
+        } catch (pageError) {
+          console.warn(`⚠️ Failed to extract page ${i}:`, pageError.message);
+          continue;
+        }
+      }
+      
+      await pdf.destroy();
+      return fullText;
+      
+    } catch (error) {
+      console.error('❌ Fallback PDF extraction failed:', error);
+      return '';
     }
   }
 
