@@ -7,12 +7,14 @@
 
 const CustomExtractionService = require('./customExtractionService');
 const AIEnhancedExtractionService = require('./aiEnhancedExtractionService');
+const HybridExtractionService = require('./hybridExtractionService');
 const OptimizedAIExtractionService = require('./optimizedAIExtractionService');
 
 class SmartExtractionRouter {
   constructor() {
     this.customService = new CustomExtractionService();
     this.aiService = new AIEnhancedExtractionService();
+    this.hybridService = new HybridExtractionService();
     this.optimizedService = new OptimizedAIExtractionService();
     
     // Document structure patterns for routing decisions
@@ -330,40 +332,15 @@ class SmartExtractionRouter {
     console.log('🔄 Executing hybrid extraction...');
     
     try {
-      // Run both custom and AI extraction in parallel
-      const [customResult, aiResult] = await Promise.allSettled([
-        this.customService.extractContacts(fileBuffer, mimeType, fileName, options),
-        this.aiService.extractContacts(fileBuffer, mimeType, fileName, options)
-      ]);
+      // Use the new hybrid service that combines AI preprocessing with custom extraction
+      const result = await this.hybridService.extractContacts(fileBuffer, mimeType, fileName);
       
-      // Combine results
-      const customContacts = customResult.status === 'fulfilled' ? customResult.value.contacts : [];
-      const aiContacts = aiResult.status === 'fulfilled' ? aiResult.value.contacts : [];
-      
-      // Merge and deduplicate contacts
-      const mergedContacts = this.mergeContactResults(customContacts, aiContacts);
-      
-      // Calculate combined confidence
-      const customConfidence = customResult.status === 'fulfilled' ? 
-        customResult.value.metadata?.averageConfidence || 0 : 0;
-      const aiConfidence = aiResult.status === 'fulfilled' ? 
-        aiResult.value.metadata?.averageConfidence || 0 : 0;
-      const combinedConfidence = (customConfidence + aiConfidence) / 2;
+      console.log(`🔄 Hybrid results: ${result.contacts.length} contacts`);
       
       return {
         success: true,
-        contacts: mergedContacts,
-        metadata: {
-          extractionMethod: 'hybrid',
-          customContacts: customContacts.length,
-          aiContacts: aiContacts.length,
-          mergedContacts: mergedContacts.length,
-          customConfidence,
-          aiConfidence,
-          combinedConfidence,
-          customSuccess: customResult.status === 'fulfilled',
-          aiSuccess: aiResult.status === 'fulfilled'
-        }
+        contacts: result.contacts,
+        metadata: result.metadata
       };
       
     } catch (error) {

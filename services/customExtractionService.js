@@ -228,12 +228,57 @@ class CustomExtractionService {
       const pdf = await loadingTask.promise;
       let fullText = '';
 
-      for (let i = 1; i <= pdf.numPages; i++) {
+      console.log(`📄 PDF reported pages: ${pdf.numPages}`);
+      
+      // Try to get actual page count by attempting to access pages
+      let actualPageCount = 0;
+      for (let i = 1; i <= Math.min(pdf.numPages, 50); i++) { // Limit to 50 pages max
+        try {
+          await pdf.getPage(i);
+          actualPageCount = i;
+        } catch (error) {
+          console.log(`📄 Last accessible page: ${i - 1}`);
+          break;
+        }
+      }
+      
+      console.log(`📄 Actual accessible pages: ${actualPageCount}`);
+      
+      // Use the actual page count, not the reported one
+      const pagesToProcess = actualPageCount || Math.min(pdf.numPages, 10);
+      
+      for (let i = 1; i <= pagesToProcess; i++) {
         try {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
-          const pageText = textContent.items.map(item => item.str).join(' ');
+          
+          // Enhanced text extraction with better formatting
+          let pageText = '';
+          let currentY = null;
+          let lineText = '';
+          
+          for (const item of textContent.items) {
+            if (item.str) {
+              // Group text by Y position to maintain line structure
+              if (currentY === null || Math.abs(item.transform[5] - currentY) > 2) {
+                if (lineText.trim()) {
+                  pageText += lineText.trim() + '\n';
+                }
+                lineText = item.str;
+                currentY = item.transform[5];
+              } else {
+                lineText += ' ' + item.str;
+              }
+            }
+          }
+          
+          // Add the last line
+          if (lineText.trim()) {
+            pageText += lineText.trim() + '\n';
+          }
+          
           fullText += pageText + '\n';
+          console.log(`📄 Page ${i} extracted: ${pageText.length} characters`);
         } catch (pageError) {
           console.warn(`⚠️ Failed to extract text from page ${i}:`, pageError.message);
           // Continue with other pages
@@ -242,6 +287,12 @@ class CustomExtractionService {
 
       if (fullText.trim().length === 0) {
         throw new Error('No text content found in PDF');
+      }
+
+      // Check if we extracted very little text from a large PDF
+      if (fullText.length < 1000 && pdf.numPages > 5) {
+        console.warn(`⚠️ Low text extraction: ${fullText.length} chars from ${pdf.numPages} pages`);
+        console.warn('📄 This might be a scanned PDF or image-based content');
       }
 
       return fullText;
