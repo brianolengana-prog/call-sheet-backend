@@ -20,7 +20,6 @@ const usageRoutes = require('./routes/usage');
 const stripeEnhancedRoutes = require('./routes/stripeEnhanced');
 const contactsRoutes = require('./routes/contacts');
 const customExtractionRoutes = require('./routes/customExtraction');
-const optimizedExtractionRoutes = require('./routes/optimizedExtraction');
 const smartExtractionRoutes = require('./routes/smartExtraction');
 const newOptimizedExtractionRoutes = require('./routes/newOptimizedExtraction');
 const apiKeyRoutes = require('./routes/apiKeys');
@@ -266,7 +265,6 @@ app.use('/api/support', apiRateLimit, supportRoutes);
 app.use('/api/contacts', apiRateLimit, contactsRoutes);
 app.use('/api/jobs', apiRateLimit, contactsRoutes); // Jobs are handled by contacts route
 app.use('/api/custom-extraction', apiRateLimit, customExtractionRoutes);
-app.use('/api/optimized-extraction', apiRateLimit, optimizedExtractionRoutes);
 app.use('/api/smart-extraction', apiRateLimit, smartExtractionRoutes);
 app.use('/api/new-optimized-extraction', apiRateLimit, newOptimizedExtractionRoutes);
 app.use('/api/api-keys', apiRateLimit, apiKeyRoutes);

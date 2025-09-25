@@ -7,7 +7,8 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { authenticateToken, authenticateAPIKey } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
+const { authenticateAPIKey } = require('../middleware/apiKeyAuth');
 const { logExtractionEvent } = require('../middleware/logging');
 
 // Import optimized service
