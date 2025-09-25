@@ -81,6 +81,10 @@ class CustomExtractionService {
       // Step 2: Text Extraction
       const extractedText = await this.extractTextFromDocument(fileBuffer, mimeType, fileName);
       console.log('📄 Text extracted, length:', extractedText.length);
+      console.log('📄 First 500 characters of extracted text:');
+      console.log(extractedText.substring(0, 500));
+      console.log('📄 Last 500 characters of extracted text:');
+      console.log(extractedText.substring(Math.max(0, extractedText.length - 500)));
 
       if (!extractedText || extractedText.trim().length < 10) {
         throw new Error('Could not extract meaningful text from document');

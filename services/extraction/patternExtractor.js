@@ -34,6 +34,7 @@ class PatternExtractor {
 
   async extractContacts(text, documentAnalysis) {
     console.log('🔍 Starting pattern-based extraction...');
+    console.log('📄 Text being processed (first 200 chars):', text.substring(0, 200));
     
     const contacts = [];
     const lines = text.split('\n');
