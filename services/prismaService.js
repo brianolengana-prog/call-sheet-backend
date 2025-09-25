@@ -13,11 +13,11 @@ class PrismaService {
       __internal: {
         engine: {
           // Connection pool settings
-          connectionLimit: 5, // Limit concurrent connections
-          poolTimeout: 10000, // 10 seconds
-          connectTimeout: 10000, // 10 seconds
+          connectionLimit: 2, // Reduced from 5 to 2 for memory efficiency
+          poolTimeout: 5000, // 5 seconds
+          connectTimeout: 5000, // 5 seconds
           // Memory management
-          maxMemoryUsage: 100 * 1024 * 1024, // 100MB limit
+          maxMemoryUsage: 50 * 1024 * 1024, // 50MB limit
         }
       }
     });

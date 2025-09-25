@@ -3,18 +3,12 @@
  * Implements database scaling and optimization strategies
  */
 
-const { PrismaClient } = require('@prisma/client');
+// Use the shared Prisma service instead of creating a new client
+const prismaService = require('./prismaService');
 
 class DatabaseOptimization {
   constructor() {
-    this.prisma = new PrismaClient({
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL
-        }
-      },
-      log: ['query', 'info', 'warn', 'error']
-    });
+    this.prisma = prismaService.getClient();
     
     this.setupOptimizations();
   }
