@@ -88,6 +88,45 @@ class OCRProcessor {
   }
 
   /**
+   * Process any document type (PDF, images)
+   * @param {Buffer} fileBuffer - File buffer
+   * @param {string} mimeType - MIME type of file
+   * @returns {string} Extracted text
+   */
+  async processDocument(fileBuffer, mimeType) {
+    if (!this.tesseract) {
+      throw new Error('OCR not available - Tesseract.js not installed. Install with: npm install tesseract.js');
+    }
+
+    console.log('🔍 OCR processing document:', mimeType);
+
+    // For PDFs, we need to convert to images first
+    if (mimeType === 'application/pdf') {
+      return await this.processPDF(fileBuffer);
+    }
+
+    // For images, process directly
+    if (mimeType.startsWith('image/')) {
+      return await this.processImage(fileBuffer);
+    }
+
+    throw new Error(`OCR not supported for type: ${mimeType}`);
+  }
+
+  /**
+   * Process PDF by converting pages to images and running OCR
+   * @param {Buffer} pdfBuffer - PDF file buffer
+   * @returns {string} Extracted text from all pages
+   */
+  async processPDF(pdfBuffer) {
+    console.log('📄 Converting PDF pages to images for OCR...');
+    
+    // For now, throw helpful error
+    // Full implementation requires pdf-to-img conversion
+    throw new Error('PDF OCR requires additional setup. Please: 1) Install pdf-poppler or pdf-to-img, 2) Convert PDF to images, 3) Enable OCR. OR convert your PDF to text-based format.');
+  }
+
+  /**
    * Check if OCR is available
    * @returns {boolean} True if OCR is available
    */
