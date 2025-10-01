@@ -23,6 +23,8 @@ const customExtractionRoutes = require('./routes/customExtraction');
 const smartExtractionRoutes = require('./routes/smartExtraction');
 const newOptimizedExtractionRoutes = require('./routes/newOptimizedExtraction');
 const apiKeyRoutes = require('./routes/apiKeys');
+const apiKeyManagementRoutes = require('./routes/apiKeyManagement');
+const apiExtractionRoutes = require('./routes/apiExtraction');
 const { errorHandler } = require('./middleware/errorHandler');
 const {
   securityHeaders,
@@ -268,6 +270,8 @@ app.use('/api/custom-extraction', apiRateLimit, customExtractionRoutes);
 app.use('/api/smart-extraction', apiRateLimit, smartExtractionRoutes);
 app.use('/api/new-optimized-extraction', apiRateLimit, newOptimizedExtractionRoutes);
 app.use('/api/api-keys', apiRateLimit, apiKeyRoutes);
+app.use('/api/api-keys', apiRateLimit, apiKeyManagementRoutes);
+app.use('/api', apiRateLimit, apiExtractionRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

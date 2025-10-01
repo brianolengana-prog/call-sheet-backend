@@ -15,8 +15,8 @@ const { logExtractionEvent, logAPIKeyUsage } = require('../middleware/logging');
 const antivirusService = require('../services/antivirusService');
 
 const router = express.Router();
-const customExtractionService = require('../services/customExtractionService');
-const aiEnhancedExtractionService = require('../services/aiEnhancedExtractionService');
+const customExtractionService = new CustomExtractionService();
+const aiEnhancedExtractionService = new AIEnhancedExtractionService();
 
 // Configure multer for file uploads
 const upload = multer({

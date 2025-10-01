@@ -48,6 +48,23 @@ class UnifiedExtractionService {
     this.productionIntelligence = new ProductionIntelligence();
     this.deduplicator = new Deduplicator();
     
+    // Initialize adaptive extractor
+    const AdaptiveExtractor = require('./extraction/adaptiveExtractor');
+    this.adaptiveExtractor = new AdaptiveExtractor();
+    
+    // Load extraction configuration
+    try {
+      this.extractionConfig = require('../config/extraction.config');
+    } catch (error) {
+      console.warn('⚠️ Extraction config not found, using defaults');
+      this.extractionConfig = {
+        useAdaptiveExtractor: true,
+        useMultiPass: false,
+        confidenceThreshold: 0.3,
+        fallbackToAI: true
+      };
+    }
+    
     // Initialize OpenAI with error handling
     this.initializeOpenAI();
     
@@ -56,7 +73,8 @@ class UnifiedExtractionService {
       totalExtractions: 0,
       successfulExtractions: 0,
       aiEnhancedExtractions: 0,
-      fallbackExtractions: 0
+      fallbackExtractions: 0,
+      adaptiveExtractions: 0
     };
   }
 
@@ -260,11 +278,11 @@ Return JSON array of contacts with: name, email, phone, role, company, confidenc
           messages: [
             {
               role: "system",
-              content: "You are an expert at extracting contacts from call sheets. Always return valid JSON array of contacts."
+              content: "You are an expert at extracting contacts from call sheets. Always return valid JSON array of contacts with these fields: name, email, phone, role, company, confidence."
             },
             { role: "user", content: prompt }
           ],
-          max_tokens: 2000,
+          max_tokens: 6000,  // Increased to handle larger call sheets
           temperature: 0.1
         });
 
@@ -343,8 +361,41 @@ Return enhanced contacts in the same JSON format:`;
 
   /**
    * Enhanced Pattern-based extraction (PRIMARY METHOD)
+   * Now using Adaptive Extractor for robust, format-agnostic extraction
    */
   async extractContactsWithPatterns(text, documentAnalysis) {
+    // Check if adaptive extractor is enabled
+    if (this.extractionConfig.useAdaptiveExtractor) {
+      console.log('🎯 Using Adaptive Extractor...');
+      this.stats.adaptiveExtractions++;
+      
+      try {
+        const result = await this.adaptiveExtractor.extract(text, documentAnalysis, {
+          useMultiPass: this.extractionConfig.useMultiPass,
+          confidenceThreshold: this.extractionConfig.confidenceThreshold
+        });
+        
+        console.log('✅ Adaptive extraction:', result.contacts.length, 'contacts');
+        console.log('📊 Structure:', result.metadata.structure.type);
+        console.log('📈 Avg confidence:', result.metadata.avgConfidence);
+        
+        return result.contacts;
+        
+      } catch (error) {
+        console.error('❌ Adaptive extraction failed:', error.message);
+        console.log('🔄 Falling back to legacy pattern extraction...');
+        // Fall through to legacy extraction
+      }
+    }
+    
+    // Legacy pattern extraction (fallback)
+    return await this.legacyPatternExtraction(text, documentAnalysis);
+  }
+
+  /**
+   * Legacy Pattern Extraction (kept as fallback)
+   */
+  async legacyPatternExtraction(text, documentAnalysis) {
     const contacts = [];
     const lines = text.split('\n');
     
@@ -352,7 +403,7 @@ Return enhanced contacts in the same JSON format:`;
     const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
     const phonePattern = /(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g;
     
-    console.log('🔍 Processing', lines.length, 'lines for pattern extraction');
+    console.log('🔍 Processing', lines.length, 'lines for legacy pattern extraction');
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -381,7 +432,7 @@ Return enhanced contacts in the same JSON format:`;
       }
     }
     
-    console.log('🔍 Pattern extraction found:', contacts.length, 'contacts');
+    console.log('🔍 Legacy pattern extraction found:', contacts.length, 'contacts');
     return contacts;
   }
 
@@ -606,15 +657,42 @@ Return the enhanced contacts in the same JSON format.`;
   }
 
   extractNameFromLine(line) {
-    // Simple name extraction - look for capitalized words before email
-    const beforeEmail = line.split('@')[0];
-    const words = beforeEmail.trim().split(/\s+/);
+    // Handle different call sheet formats:
+    // 1. "Role: Name / Phone" (e.g., "Photographer: Coni Tarallo / 929.250.6798")
+    // 2. "Name <email>" or "Name email@domain.com"
+    // 3. "Name / Phone"
+    
+    // Pattern 1: Role: Name / Phone
+    const rolePattern = /^([^:]+):\s*([^\/]+)\s*\//;
+    const roleMatch = line.match(rolePattern);
+    if (roleMatch) {
+      return roleMatch[2].trim();
+    }
+    
+    // Pattern 2: Look for name before email
+    if (line.includes('@')) {
+      const beforeEmail = line.split('@')[0];
+      const words = beforeEmail.trim().split(/\s+/);
+      const nameWords = words.filter(word => 
+        word.length > 1 && 
+        /^[A-Z]/.test(word) && 
+        !/^[A-Z]{2,}$/.test(word) // Not all caps
+      );
+      return nameWords.slice(0, 2).join(' ');
+    }
+    
+    // Pattern 3: Look for name before phone number or slash
+    const beforePhoneOrSlash = line.split(/[\/\(0-9]/)[0];
+    const words = beforePhoneOrSlash.trim().split(/\s+/);
     const nameWords = words.filter(word => 
       word.length > 1 && 
       /^[A-Z]/.test(word) && 
-      !/^[A-Z]{2,}$/.test(word) // Not all caps
+      !/^[A-Z]{2,}$/.test(word) && // Not all caps
+      !word.includes(':') // Not a role prefix
     );
-    return nameWords.slice(0, 2).join(' ');
+    
+    // Return first 2-3 words as name
+    return nameWords.slice(0, 3).join(' ');
   }
 
   extractPhoneFromLine(line) {
@@ -625,32 +703,74 @@ Return the enhanced contacts in the same JSON format.`;
   inferRoleFromContext(line, allLines, documentAnalysis) {
     const lineLower = line.toLowerCase();
     
-    // Common role patterns
+    // Pattern 1: Extract role from "Role:" prefix (e.g., "Photographer: Name / Phone")
+    const rolePattern = /^([^:]+):/;
+    const roleMatch = line.match(rolePattern);
+    if (roleMatch) {
+      const role = roleMatch[1].trim();
+      // Clean up common role formats
+      return role
+        .replace(/^(1st|2nd|3rd)\s+/i, '') // Remove ordinal prefixes for consistency
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    
+    // Pattern 2: Common role keywords
+    if (lineLower.includes('photographer')) return 'Photographer';
     if (lineLower.includes('director')) return 'Director';
     if (lineLower.includes('producer')) return 'Producer';
+    if (lineLower.includes('assistant')) return 'Production Assistant';
+    if (lineLower.includes('digitech')) return 'Digital Technician';
+    if (lineLower.includes('videographer')) return 'Videographer';
+    if (lineLower.includes('model')) return 'Model';
+    if (lineLower.includes('casting')) return 'Casting Director';
     if (lineLower.includes('camera')) return 'Camera';
     if (lineLower.includes('sound')) return 'Sound';
     if (lineLower.includes('grip')) return 'Grip';
     if (lineLower.includes('electric')) return 'Electric';
-    if (lineLower.includes('makeup') || lineLower.includes('hmu')) return 'Makeup';
-    if (lineLower.includes('wardrobe') || lineLower.includes('stylist')) return 'Wardrobe';
+    if (lineLower.includes('mua') || lineLower.includes('makeup')) return 'Makeup Artist';
+    if (lineLower.includes('hua') || lineLower.includes('hair')) return 'Hair Artist';
+    if (lineLower.includes('hmua')) return 'Hair & Makeup Artist';
+    if (lineLower.includes('stylist')) return 'Stylist';
+    if (lineLower.includes('wardrobe')) return 'Wardrobe';
+    if (lineLower.includes('driver')) return 'Driver';
     
     return 'Crew';
   }
 
   inferCompanyFromContext(line, allLines, documentAnalysis) {
-    // Look for company indicators in the line
-    const companyPatterns = [
-      /@([a-zA-Z0-9.-]+)\./,
-      /([A-Z][a-z]+ [A-Z][a-z]+)/,
-      /([A-Z]{2,})/
-    ];
-    
-    for (const pattern of companyPatterns) {
-      const match = line.match(pattern);
-      if (match && match[1] && match[1].length > 2) {
-        return match[1];
+    // Pattern 1: Model agency format: "Model: NAME / Agency Agent / Phone"
+    // Example: "Model: BIANCA FELICIANO / Ford Brett Pougnet / 917.783.8966"
+    if (line.toLowerCase().includes('model')) {
+      const parts = line.split('/');
+      if (parts.length >= 3) {
+        // The middle part is usually "Agency AgentName"
+        const agencyPart = parts[1].trim();
+        // Extract agency name (first word or two before agent name)
+        const agencyMatch = agencyPart.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+[-\s]?\s*([A-Z][a-z]+\s+[A-Z][a-z]+)/);
+        if (agencyMatch) {
+          return `${agencyMatch[1]} (Agent: ${agencyMatch[2]})`;
+        }
+        return agencyPart;
       }
+    }
+    
+    // Pattern 2: Email domain as company
+    const emailMatch = line.match(/@([a-zA-Z0-9.-]+)\./);
+    if (emailMatch) {
+      return emailMatch[1];
+    }
+    
+    // Pattern 3: All caps company name (e.g., "ACME STUDIOS")
+    const allCapsMatch = line.match(/\b([A-Z]{2,}(?:\s+[A-Z]{2,})*)\b/);
+    if (allCapsMatch && allCapsMatch[1].length > 2) {
+      return allCapsMatch[1];
+    }
+    
+    // Pattern 4: Capitalized company name
+    const capitalizedMatch = line.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/);
+    if (capitalizedMatch) {
+      return capitalizedMatch[1];
     }
     
     return '';
@@ -703,9 +823,17 @@ Return the enhanced contacts in the same JSON format.`;
     return {
       ...this.stats,
       aiAvailable: this.aiAvailable,
+      adaptiveExtractorEnabled: this.extractionConfig.useAdaptiveExtractor,
+      multiPassEnabled: this.extractionConfig.useMultiPass,
       successRate: this.stats.totalExtractions > 0 
         ? (this.stats.successfulExtractions / this.stats.totalExtractions) * 100 
-        : 0
+        : 0,
+      adaptiveUsageRate: this.stats.totalExtractions > 0
+        ? (this.stats.adaptiveExtractions / this.stats.totalExtractions) * 100
+        : 0,
+      adaptiveExtractorStats: this.adaptiveExtractor ? {
+        totalExtractions: this.adaptiveExtractor.metrics?.totalExtractions || 0
+      } : null
     };
   }
 
