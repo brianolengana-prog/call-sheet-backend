@@ -276,38 +276,45 @@ class CustomExtractionService {
           page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           
-          // Enhanced text extraction with better formatting for call sheets
-          let pageText = '';
-          let currentY = null;
-          let lineText = '';
+          console.log(`📄 Page ${i} textContent items: ${textContent.items ? textContent.items.length : 0}`);
           
-          for (const item of textContent.items) {
-            if (item.str) {
-              // Group text by Y position to maintain line structure
-              if (currentY === null || Math.abs(item.transform[5] - currentY) > 2) {
-                if (lineText.trim()) {
-                  pageText += lineText.trim() + '\n';
+          // Simple, robust text extraction
+          let pageText = '';
+          
+          if (textContent.items && Array.isArray(textContent.items)) {
+            // Method 1: Simple concatenation with spaces
+            pageText = textContent.items
+              .map(item => {
+                if (item && typeof item === 'object' && item.str) {
+                  return item.str;
                 }
-                lineText = item.str;
-                currentY = item.transform[5];
-              } else {
-                lineText += ' ' + item.str;
+                // Handle case where item might be a string directly
+                if (typeof item === 'string') {
+                  return item;
+                }
+                return '';
+              })
+              .filter(str => str.length > 0)
+              .join(' ');
+          }
+          
+          console.log(`📄 Page ${i} raw text length: ${pageText.length}`);
+          
+          // If simple method got nothing, try accessing items differently
+          if (pageText.length === 0 && textContent.items) {
+            console.log('⚠️ Trying alternative extraction method...');
+            const allText = [];
+            for (let j = 0; j < textContent.items.length; j++) {
+              const item = textContent.items[j];
+              if (item && item.str) {
+                allText.push(item.str);
               }
             }
+            pageText = allText.join(' ');
+            console.log(`📄 Alternative method got: ${pageText.length} characters`);
           }
           
-          // Add the last line
-          if (lineText.trim()) {
-            pageText += lineText.trim() + '\n';
-          }
-          
-          // Enhanced formatting for call sheet structure
-          pageText = pageText
-            .replace(/\s+/g, ' ') // Normalize whitespace
-            .replace(/\n\s*\n/g, '\n') // Remove empty lines
-            .trim();
-          
-          fullText += pageText + '\n';
+          fullText += pageText + ' ';
           console.log(`📄 Page ${i} extracted: ${pageText.length} characters`);
           
           // Force cleanup of page object
