@@ -9,6 +9,10 @@ const path = require('path');
 const fs = require('fs').promises;
 const { authenticateToken } = require('../middleware/auth');
 const ExtractionService = require('../services/extractionService');
+
+// ✅ Create singleton instance to prevent memory leaks
+const extractionService = new ExtractionService();
+
 let customExtractionService;
 try {
   const CustomExtractionServiceClass = require('../services/customExtractionService');
@@ -118,8 +122,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       });
     }
 
-    // Extract contacts using the existing service
-    const extractionService = new ExtractionService();
+    // Extract contacts using the singleton service
     const uploadExtractedText = await extractionService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
     if (!uploadExtractedText || uploadExtractedText.trim().length < 10) {
       throw new Error('Could not extract text from file or file is too short');
@@ -454,12 +457,11 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
     switch (extractionMethod) {
       case 'ai':
         console.log('🤖 Using AI extraction method');
-        const aiService = new ExtractionService();
-        const aiExtractedText = await aiService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
+        const aiExtractedText = await extractionService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
         if (!aiExtractedText || aiExtractedText.trim().length < 10) {
           throw new Error('Could not extract text from file or file is too short');
         }
-        result = await aiService.extractContacts(
+        result = await extractionService.extractContacts(
           aiExtractedText, 
           parsedRolePreferences, 
           parsedOptions,
@@ -506,12 +508,11 @@ router.post('/upload-with-method', upload.single('file'), async (req, res) => {
         } catch (managerError) {
           console.warn('⚠️ Extraction manager failed, falling back to AI:', managerError.message);
           // Fallback to AI extraction
-          const autoFallbackService = new ExtractionService();
-          const autoExtractedText = await autoFallbackService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
+          const autoExtractedText = await extractionService.processFile(fileBuffer, req.file.mimetype, req.file.originalname);
           if (!autoExtractedText || autoExtractedText.trim().length < 10) {
             throw new Error('Could not extract text from file or file is too short');
           }
-          result = await autoFallbackService.extractContacts(
+          result = await extractionService.extractContacts(
             autoExtractedText, 
             parsedRolePreferences, 
             parsedOptions,

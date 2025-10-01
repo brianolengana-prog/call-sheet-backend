@@ -263,12 +263,14 @@ class CustomExtractionService {
       for (let i = 1; i <= maxPages; i++) {
         let page = null;
         try {
-          // Check memory before each page
-          const memUsage = process.memoryUsage();
-          const memPercent = memUsage.heapUsed / memUsage.heapTotal;
-          if (memPercent > 0.90) {
-            console.warn(`⚠️ Memory usage too high (${(memPercent * 100).toFixed(1)}%), stopping PDF processing`);
-            break;
+          // Check memory before each page (but always process first page)
+          if (i > 1) {
+            const memUsage = process.memoryUsage();
+            const memPercent = memUsage.heapUsed / memUsage.heapTotal;
+            if (memPercent > 0.95) {
+              console.warn(`⚠️ Memory usage too high (${(memPercent * 100).toFixed(1)}%), stopping PDF processing at page ${i}`);
+              break;
+            }
           }
           
           page = await pdf.getPage(i);

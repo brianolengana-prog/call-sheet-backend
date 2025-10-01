@@ -16,9 +16,9 @@ const usageService = require('../services/usageService');
 const optimizedExtractionService = require('../services/optimizedExtractionService');
 const smartExtractionRouter = require('../services/smartExtractionRouter');
 
-// Configure multer for API usage
+// Configure multer for API usage (using disk storage to prevent memory issues)
 const upload = multer({
-  storage: multer.memoryStorage(),
+  dest: 'uploads/',
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
     files: 1

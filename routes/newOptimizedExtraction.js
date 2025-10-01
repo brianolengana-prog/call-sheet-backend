@@ -14,9 +14,9 @@ const { logExtractionEvent } = require('../middleware/logging');
 // Import optimized service
 const optimizedExtractionService = require('../services/optimizedExtractionService');
 
-// Configure multer for memory-efficient file handling
+// Configure multer for disk storage (prevents memory issues)
 const upload = multer({
-  storage: multer.memoryStorage(),
+  dest: 'uploads/',
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
     files: 1
