@@ -164,7 +164,7 @@ async function runTests() {
       
       console.log(`✅ Extracted ${result.contacts.length} contacts`);
       console.log(`📊 Structure: ${result.metadata.structure.type}`);
-      console.log(`🎯 Strategies used: ${result.metadata.strategiesUsed.join(', ')}`);
+      console.log(`🎯 Strategies used: ${result.metadata.strategiesUsed || 'N/A'}`);
       
       // Show contacts
       result.contacts.forEach((contact, index) => {

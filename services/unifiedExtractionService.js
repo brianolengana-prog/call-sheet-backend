@@ -14,6 +14,7 @@ const ContactValidator = require('./extraction/contactValidator');
 const ConfidenceScorer = require('./extraction/confidenceScorer');
 const OCRProcessor = require('./extraction/ocrProcessor');
 const PatternExtractor = require('./extraction/patternExtractor');
+const TextCleaner = require('./extraction/textCleaner');
 
 // Import production intelligence with fallback
 let ProductionIntelligence;
@@ -47,6 +48,7 @@ class UnifiedExtractionService {
     this.patternExtractor = new PatternExtractor();
     this.productionIntelligence = new ProductionIntelligence();
     this.deduplicator = new Deduplicator();
+    this.textCleaner = new TextCleaner();
     
     // Initialize adaptive extractor
     const AdaptiveExtractor = require('./extraction/adaptiveExtractor');
@@ -116,20 +118,42 @@ class UnifiedExtractionService {
         throw new Error('Could not extract meaningful text from document');
       }
 
+      // Step 2.5: Clean and validate text (remove PDF artifacts)
+      let cleanedText;
+      try {
+        cleanedText = this.textCleaner.prepare(preprocessedText);
+      } catch (cleanError) {
+        console.error('❌ Text validation failed:', cleanError.message);
+        
+        // If it's a PDF with garbage, try OCR
+        if (mimeType === 'application/pdf') {
+          console.log('🔄 Attempting OCR on PDF...');
+          try {
+            cleanedText = await this.ocrProcessor.processDocument(fileBuffer, mimeType);
+            console.log('✅ OCR extracted text, length:', cleanedText.length);
+          } catch (ocrError) {
+            console.error('❌ OCR also failed:', ocrError.message);
+            throw new Error('PDF appears to be image-based or corrupted. OCR failed. Please try a text-based PDF.');
+          }
+        } else {
+          throw cleanError;
+        }
+      }
+
       // Step 3: AI Pattern Recognition (with custom fallback)
-      const aiContacts = await this.extractContactsWithAIPatterns(preprocessedText, documentAnalysis, options);
+      const aiContacts = await this.extractContactsWithAIPatterns(cleanedText, documentAnalysis, options);
       console.log('🤖 AI pattern extraction found:', aiContacts.length, 'contacts');
 
       // Step 4: AI Production Intelligence (with custom fallback)
-      const productionEnhancedContacts = await this.enhanceWithProductionAI(aiContacts, preprocessedText, documentAnalysis);
+      const productionEnhancedContacts = await this.enhanceWithProductionAI(aiContacts, cleanedText, documentAnalysis);
       console.log('🎬 AI production enhancement:', productionEnhancedContacts.length, 'contacts');
 
       // Step 5: AI Quality Assurance (with custom fallback)
-      const aiValidatedContacts = await this.validateContactsWithAI(productionEnhancedContacts, preprocessedText, documentAnalysis);
+      const aiValidatedContacts = await this.validateContactsWithAI(productionEnhancedContacts, cleanedText, documentAnalysis);
       console.log('✅ AI validation complete:', aiValidatedContacts.length, 'contacts');
 
       // Step 6: Custom Fallback for AI Limitations
-      const finalContacts = await this.handleAILimitations(aiValidatedContacts, preprocessedText, documentAnalysis);
+      const finalContacts = await this.handleAILimitations(aiValidatedContacts, cleanedText, documentAnalysis);
       console.log('🔄 Final contacts after handling AI limitations:', finalContacts.length, 'contacts');
 
       this.stats.successfulExtractions++;

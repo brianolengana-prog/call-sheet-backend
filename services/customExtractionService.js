@@ -156,13 +156,20 @@ class CustomExtractionService {
           try {
             return await this.extractTextFromPDF(fileBuffer);
           } catch (pdfError) {
-            console.warn('⚠️ PDF extraction failed, trying fallback method...');
-            // Try to extract as plain text as fallback
+            console.warn('⚠️ PDF extraction failed:', pdfError.message);
+            console.log('🔄 Attempting OCR as fallback...');
+            
+            // Don't fall back to toString - that creates garbage!
+            // Instead, try OCR or throw error
             try {
-              return fileBuffer.toString('utf8');
-            } catch (fallbackError) {
-              console.error('❌ PDF fallback extraction also failed:', fallbackError);
-              throw pdfError; // Throw original PDF error
+              const OCRProcessor = require('./extraction/ocrProcessor');
+              const ocrProcessor = new OCRProcessor();
+              const ocrText = await ocrProcessor.processDocument(fileBuffer, mimeType);
+              console.log('✅ OCR extracted text successfully');
+              return ocrText;
+            } catch (ocrError) {
+              console.error('❌ OCR also failed:', ocrError.message);
+              throw new Error('PDF text extraction failed. This PDF may be image-based or corrupted. Please try converting to a text-based format or use OCR.');
             }
           }
         case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
@@ -228,7 +235,7 @@ class CustomExtractionService {
       const pdf = await loadingTask.promise;
       let fullText = '';
 
-      console.log(`📄 PDF reported pages: ${pdf.numPages}`);
+      console.log(`📄 PDF has ${pdf.numPages} pages`);
       
       // Fix for PDF.js misreporting page count - try to access pages to find actual count
       let actualPageCount = pdf.numPages;
@@ -325,7 +332,15 @@ class CustomExtractionService {
       pdf.destroy();
 
       if (fullText.trim().length === 0) {
-        throw new Error('No text content found in PDF');
+        throw new Error('No text content found in PDF - likely image-based or scanned');
+      }
+
+      // CRITICAL: Validate that we got real text, not PDF garbage
+      const isGarbage = this.isPDFGarbage(fullText);
+      if (isGarbage) {
+        console.error('❌ PDF extraction returned garbage (PDF structure/binary data)');
+        console.log('🔄 This is likely an image-based or scanned PDF - OCR required');
+        throw new Error('PDF contains no extractable text - appears to be image-based. OCR processing required.');
       }
 
       // Check if we extracted very little text from a large PDF
@@ -334,6 +349,7 @@ class CustomExtractionService {
         console.warn('📄 This might be a scanned PDF or image-based content');
       }
 
+      console.log(`✅ PDF text extraction successful: ${fullText.length} characters`);
       return fullText;
     } catch (error) {
       console.error('❌ PDF extraction failed:', error);
@@ -619,6 +635,70 @@ class CustomExtractionService {
     
     const averageScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
     return Math.round(averageScore);
+  }
+
+  /**
+   * Detect if extracted text is PDF garbage (binary/structure data)
+   */
+  isPDFGarbage(text) {
+    if (!text || text.length < 10) return false;
+    
+    // PDF structure markers that indicate extraction failed
+    const pdfMarkers = [
+      'endobj', 'stream', 'endstream', 'xref', 'trailer',
+      'startxref', '%%EOF', '/Type', '/Subtype', '/Filter',
+      '/Length', '/Root', '/Info', '/Catalog', '/Pages'
+    ];
+    
+    // Count how many PDF markers are present
+    let markerCount = 0;
+    pdfMarkers.forEach(marker => {
+      if (text.includes(marker)) markerCount++;
+    });
+    
+    // If 3+ PDF markers, it's definitely garbage
+    if (markerCount >= 3) {
+      console.warn(`⚠️ Found ${markerCount} PDF structure markers - text is garbage`);
+      return true;
+    }
+    
+    // Check for binary/encoded data patterns
+    const binaryPatterns = [
+      /[\x00-\x08\x0B\x0C\x0E-\x1F]{5,}/,  // Control characters
+      /�{10,}/,  // Replacement characters (bad encoding)
+      /[^\x20-\x7E\n\r\t]{50,}/  // Non-ASCII sequences
+    ];
+    
+    for (const pattern of binaryPatterns) {
+      if (pattern.test(text.substring(0, 2000))) { // Check first 2000 chars
+        console.warn('⚠️ Found binary data patterns - text is garbage');
+        return true;
+      }
+    }
+    
+    // Check for high ratio of non-printable characters
+    const sample = text.substring(0, 5000);
+    const nonPrintable = (sample.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F�]/g) || []).length;
+    const nonPrintableRatio = nonPrintable / sample.length;
+    
+    if (nonPrintableRatio > 0.15) {
+      console.warn(`⚠️ ${(nonPrintableRatio * 100).toFixed(1)}% non-printable characters - text is garbage`);
+      return true;
+    }
+    
+    // Check for image metadata markers
+    const imageMarkers = ['JFIF', 'ICC_PROFILE', 'Exif', 'XYZ', 'RGB'];
+    let imageMarkerCount = 0;
+    imageMarkers.forEach(marker => {
+      if (text.includes(marker)) imageMarkerCount++;
+    });
+    
+    if (imageMarkerCount >= 2) {
+      console.warn(`⚠️ Found ${imageMarkerCount} image metadata markers - PDF is image-based`);
+      return true;
+    }
+    
+    return false;
   }
 }
 

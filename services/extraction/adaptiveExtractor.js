@@ -143,6 +143,11 @@ class AdaptiveExtractor {
   async extract(text, documentAnalysis = {}, options = {}) {
     console.log('🧠 Starting adaptive extraction...');
     
+    // Step 0: Quick validation for garbage text
+    if (this.isPDFGarbage(text)) {
+      throw new Error('Text appears to contain PDF structure/binary data. Text extraction may have failed. Try OCR or re-save as text-based PDF.');
+    }
+    
     // Step 1: Detect format and structure
     const structure = this.analyzeStructure(text);
     console.log('📊 Document structure:', structure);
@@ -184,6 +189,7 @@ class AdaptiveExtractor {
       metadata: {
         structure,
         extractionMode: useMultiPass ? 'multi-pass' : 'multi-strategy',
+        strategiesUsed: this.selectStrategies(structure).map(s => s.name),
         totalRawContacts: allContacts.length,
         duplicatesRemoved: allContacts.length - mergedContacts.length,
         avgConfidence: this.calculateAverageConfidence(filteredContacts)
@@ -1198,7 +1204,40 @@ class AdaptiveExtractor {
     const sum = contacts.reduce((acc, c) => acc + (c.confidence || 0), 0);
     return parseFloat((sum / contacts.length).toFixed(2));
   }
+
+  /**
+   * Detect if text is PDF garbage (failed extraction)
+   */
+  isPDFGarbage(text) {
+    if (!text || text.trim().length < 10) return false;
+    
+    // Check for PDF structure markers
+    const pdfMarkers = [
+      'endobj', 'stream', 'endstream', 'xref', 'trailer', 
+      'startxref', '%%EOF', '/Type', '/Subtype', '/Filter'
+    ];
+    
+    const markerCount = pdfMarkers.filter(marker => text.includes(marker)).length;
+    
+    // If 3+ PDF markers, it's likely garbage
+    if (markerCount >= 3) {
+      console.warn('⚠️ Detected PDF structure markers in text - likely failed extraction');
+      return true;
+    }
+    
+    // Check for high ratio of non-printable characters
+    const nonPrintable = (text.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g) || []).length;
+    const nonPrintableRatio = nonPrintable / text.length;
+    
+    if (nonPrintableRatio > 0.2) {
+      console.warn(`⚠️ Text is ${(nonPrintableRatio * 100).toFixed(1)}% non-printable - likely binary`);
+      return true;
+    }
+    
+    return false;
+  }
 }
 
 module.exports = AdaptiveExtractor;
+
 
