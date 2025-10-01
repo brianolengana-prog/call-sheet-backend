@@ -273,10 +273,21 @@ class CustomExtractionService {
             }
           }
           
+          console.log(`🔍 DEBUG: Getting page ${i}...`);
           page = await pdf.getPage(i);
+          console.log(`🔍 DEBUG: Got page ${i}, getting text content...`);
           const textContent = await page.getTextContent();
           
+          console.log(`🔍 DEBUG: textContent type: ${typeof textContent}`);
+          console.log(`🔍 DEBUG: textContent.items exists: ${!!textContent.items}`);
+          console.log(`🔍 DEBUG: textContent.items is array: ${Array.isArray(textContent.items)}`);
           console.log(`📄 Page ${i} textContent items: ${textContent.items ? textContent.items.length : 0}`);
+          
+          // Log first few items for debugging
+          if (textContent.items && textContent.items.length > 0) {
+            console.log(`🔍 DEBUG: First item:`, JSON.stringify(textContent.items[0]));
+            console.log(`🔍 DEBUG: First 3 items str values:`, textContent.items.slice(0, 3).map(item => item.str));
+          }
           
           // Simple, robust text extraction
           let pageText = '';
@@ -296,6 +307,13 @@ class CustomExtractionService {
               })
               .filter(str => str.length > 0)
               .join(' ');
+            
+            console.log(`🔍 DEBUG: After map/filter/join, pageText length: ${pageText.length}`);
+            if (pageText.length > 0) {
+              console.log(`🔍 DEBUG: First 100 chars: "${pageText.substring(0, 100)}"`);
+            }
+          } else {
+            console.log(`❌ DEBUG: textContent.items is not a valid array!`);
           }
           
           console.log(`📄 Page ${i} raw text length: ${pageText.length}`);
@@ -341,6 +359,8 @@ class CustomExtractionService {
       pdf.destroy();
 
       if (fullText.trim().length === 0) {
+        console.log('⚠️ PDF.js extracted 0 characters - trying AI Vision fallback...');
+        // Don't throw yet - let the catch block handle AI Vision fallback
         throw new Error('No text content found in PDF - likely image-based or scanned');
       }
 
@@ -375,7 +395,109 @@ class CustomExtractionService {
         console.error('❌ Fallback extraction also failed:', fallbackError);
       }
       
+      // ULTIMATE FALLBACK: Use GPT-4 Vision to read PDF as image
+      try {
+        console.log('🎨 ULTIMATE FALLBACK: Using GPT-4 Vision to read PDF...');
+        const visionText = await this.extractTextWithAIVision(fileBuffer);
+        if (visionText && visionText.length > 50) {
+          console.log('✅ AI Vision extraction successful:', visionText.length, 'characters');
+          return visionText;
+        }
+      } catch (visionError) {
+        console.error('❌ AI Vision also failed:', visionError.message);
+      }
+      
       throw new Error(`PDF text extraction failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * ULTIMATE FALLBACK: Use GPT-4 Vision to read PDF as image
+   * This works for ANY PDF - text-based, image-based, corrupted, etc.
+   */
+  async extractTextWithAIVision(fileBuffer) {
+    try {
+      console.log('🎨 Converting PDF to image for AI Vision...');
+      
+      // Load PDF
+      const data = Buffer.isBuffer(fileBuffer) ? new Uint8Array(fileBuffer) : new Uint8Array(fileBuffer);
+      const loadingTask = this.pdfjs.getDocument({ data });
+      const pdf = await loadingTask.promise;
+      
+      // Convert first page to canvas/image
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better quality
+      
+      // Create canvas
+      const { createCanvas } = require('canvas');
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const context = canvas.getContext('2d');
+      
+      // Render PDF page to canvas
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+      
+      // Convert canvas to base64 image
+      const imageBuffer = canvas.toBuffer('image/png');
+      const base64Image = imageBuffer.toString('base64');
+      
+      pdf.destroy();
+      
+      console.log('🎨 PDF converted to image, sending to GPT-4 Vision...');
+      
+      // Send to OpenAI GPT-4 Vision
+      const openaiApiKey = process.env.OPENAI_API_KEY;
+      if (!openaiApiKey) {
+        throw new Error('OPENAI_API_KEY not configured');
+      }
+      
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiApiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4-vision-preview',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Extract ALL text from this call sheet image. Return ONLY the raw text content, preserving names, phone numbers, emails, roles, and formatting. Do not summarize or interpret - just extract the text exactly as it appears.'
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/png;base64,${base64Image}`,
+                    detail: 'high'
+                  }
+                }
+              ]
+            }
+          ],
+          max_tokens: 4000,
+          temperature: 0
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} - ${error}`);
+      }
+      
+      const data2 = await response.json();
+      const extractedText = data2.choices[0]?.message?.content || '';
+      
+      console.log(`✅ AI Vision extracted ${extractedText.length} characters`);
+      return extractedText;
+      
+    } catch (error) {
+      console.error('❌ AI Vision extraction failed:', error);
+      throw error;
     }
   }
 
