@@ -417,37 +417,14 @@ class CustomExtractionService {
    */
   async extractTextWithAIVision(fileBuffer) {
     try {
-      console.log('🎨 Converting PDF to image for AI Vision...');
+      console.log('🎨 Using AI Vision to read PDF (no canvas needed)...');
       
-      // Load PDF
-      const data = Buffer.isBuffer(fileBuffer) ? new Uint8Array(fileBuffer) : new Uint8Array(fileBuffer);
-      const loadingTask = this.pdfjs.getDocument({ data });
-      const pdf = await loadingTask.promise;
+      // Simply send the PDF as base64 - OpenAI handles it!
+      const base64PDF = Buffer.from(fileBuffer).toString('base64');
       
-      // Convert first page to canvas/image
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better quality
+      console.log(`📄 PDF size: ${Math.round(base64PDF.length / 1024)}KB, sending to GPT-4 Vision...`);
       
-      // Create canvas
-      const { createCanvas } = require('canvas');
-      const canvas = createCanvas(viewport.width, viewport.height);
-      const context = canvas.getContext('2d');
-      
-      // Render PDF page to canvas
-      await page.render({
-        canvasContext: context,
-        viewport: viewport
-      }).promise;
-      
-      // Convert canvas to base64 image
-      const imageBuffer = canvas.toBuffer('image/png');
-      const base64Image = imageBuffer.toString('base64');
-      
-      pdf.destroy();
-      
-      console.log('🎨 PDF converted to image, sending to GPT-4 Vision...');
-      
-      // Send to OpenAI GPT-4 Vision
+      // Send to OpenAI GPT-4 Vision (can handle PDFs directly!)
       const openaiApiKey = process.env.OPENAI_API_KEY;
       if (!openaiApiKey) {
         throw new Error('OPENAI_API_KEY not configured');
@@ -460,20 +437,19 @@ class CustomExtractionService {
           'Authorization': `Bearer ${openaiApiKey}`
         },
         body: JSON.stringify({
-          model: 'gpt-4-vision-preview',
+          model: 'gpt-4o',  // Updated model that handles PDFs better
           messages: [
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Extract ALL text from this call sheet image. Return ONLY the raw text content, preserving names, phone numbers, emails, roles, and formatting. Do not summarize or interpret - just extract the text exactly as it appears.'
+                  text: 'This is a call sheet PDF. Extract ALL text content from it. Return the raw text preserving names, phone numbers, emails, roles, and structure. Include every person listed with their contact information. Do not summarize - extract everything.'
                 },
                 {
                   type: 'image_url',
                   image_url: {
-                    url: `data:image/png;base64,${base64Image}`,
-                    detail: 'high'
+                    url: `data:application/pdf;base64,${base64PDF}`
                   }
                 }
               ]
@@ -485,18 +461,25 @@ class CustomExtractionService {
       });
       
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} - ${error}`);
+        const errorText = await response.text();
+        console.error('❌ OpenAI API error:', errorText);
+        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
       }
       
-      const data2 = await response.json();
-      const extractedText = data2.choices[0]?.message?.content || '';
+      const data = await response.json();
+      const extractedText = data.choices?.[0]?.message?.content || '';
+      
+      if (!extractedText || extractedText.length < 50) {
+        throw new Error(`AI Vision returned insufficient text: ${extractedText.length} characters`);
+      }
       
       console.log(`✅ AI Vision extracted ${extractedText.length} characters`);
+      console.log(`📄 First 200 chars: "${extractedText.substring(0, 200)}..."`);
+      
       return extractedText;
       
     } catch (error) {
-      console.error('❌ AI Vision extraction failed:', error);
+      console.error('❌ AI Vision extraction failed:', error.message);
       throw error;
     }
   }
