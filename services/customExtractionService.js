@@ -386,16 +386,30 @@ class CustomExtractionService {
       try {
         console.log('🔄 Attempting pdf-parse library extraction...');
         const pdfParse = require('pdf-parse');
-        const data = await pdfParse(Buffer.from(fileBuffer));
         
-        if (data.text && data.text.trim().length > 50) {
+        // Try with different options to extract more text
+        const data = await pdfParse(Buffer.from(fileBuffer), {
+          max: 0,  // Parse all pages
+          version: 'v2.0.550'  // Try specific version
+        });
+        
+        console.log(`📊 pdf-parse result: ${data.text.length} chars, ${data.numpages} pages, ${data.info ? 'has info' : 'no info'}`);
+        console.log(`📄 Raw text content: "${data.text}"`);
+        
+        if (data.text && data.text.trim().length > 10) {
           console.log(`✅ pdf-parse extracted ${data.text.length} characters from ${data.numpages} pages`);
-          console.log(`📄 First 200 chars: "${data.text.substring(0, 200)}..."`);
-          return data.text;
+          
+          // Even if it's short, let's try to use it
+          if (data.text.trim().length >= 20) {
+            console.log(`📄 Accepting text (${data.text.length} chars)`);
+            return data.text;
+          }
         }
         console.log('⚠️ pdf-parse returned insufficient text:', data.text.length, 'characters');
+        console.log(`⚠️ Text preview: "${data.text.substring(0, 100)}"`);
       } catch (pdfParseError) {
         console.error('❌ pdf-parse also failed:', pdfParseError.message);
+        console.error('Stack:', pdfParseError.stack);
       }
       
       // Fallback 2: Try original fallback method

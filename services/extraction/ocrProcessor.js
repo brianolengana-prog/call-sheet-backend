@@ -7,12 +7,15 @@
 class OCRProcessor {
   constructor() {
     this.tesseract = null;
+    this.createWorker = null;
     this.initializeOCR();
   }
 
   async initializeOCR() {
     try {
-      this.tesseract = require('tesseract.js');
+      const tesseract = require('tesseract.js');
+      this.tesseract = tesseract;
+      this.createWorker = tesseract.createWorker;
       console.log('✅ OCR processor initialized');
     } catch (error) {
       console.warn('⚠️ Tesseract.js not available for OCR processing');
@@ -26,23 +29,30 @@ class OCRProcessor {
    * @returns {string} Extracted text
    */
   async processImage(imageBuffer, options = {}) {
-    if (!this.tesseract) {
+    if (!this.createWorker) {
       throw new Error('OCR processing not available - Tesseract.js not installed');
     }
 
     console.log('🔍 Starting OCR processing...');
     
-    const ocrOptions = {
-      logger: m => console.log('OCR:', m),
-      ...options
-    };
+    const worker = await this.createWorker('eng', 1, {
+      logger: m => {
+        if (options.logger) {
+          options.logger(m);
+        } else if (m.status === 'recognizing text') {
+          console.log(`OCR Progress: ${(m.progress * 100).toFixed(0)}%`);
+        }
+      }
+    });
 
     try {
-      const { data: { text } } = await this.tesseract.recognize(imageBuffer, 'eng', ocrOptions);
+      const { data: { text } } = await worker.recognize(imageBuffer);
+      await worker.terminate();
       
       console.log(`📄 OCR extracted ${text.length} characters`);
       return text;
     } catch (error) {
+      await worker.terminate();
       console.error('❌ OCR processing failed:', error);
       throw new Error(`OCR processing failed: ${error.message}`);
     }
@@ -119,11 +129,107 @@ class OCRProcessor {
    * @returns {string} Extracted text from all pages
    */
   async processPDF(pdfBuffer) {
+    if (!this.createWorker) {
+      throw new Error('OCR not available - Tesseract.js not installed. Install with: npm install tesseract.js');
+    }
+
     console.log('📄 Converting PDF pages to images for OCR...');
     
-    // For now, throw helpful error
-    // Full implementation requires pdf-to-img conversion
-    throw new Error('PDF OCR requires additional setup. Please: 1) Install pdf-poppler or pdf-to-img, 2) Convert PDF to images, 3) Enable OCR. OR convert your PDF to text-based format.');
+    try {
+      // Import required libraries
+      const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
+      const { createCanvas } = require('canvas');
+      
+      // Convert Buffer to Uint8Array for pdfjs
+      const data = new Uint8Array(pdfBuffer);
+      
+      // Load PDF document
+      const loadingTask = pdfjs.getDocument({
+        data: data,
+        verbosity: 0,
+        disableAutoFetch: true,
+        disableStream: true,
+        disableRange: true
+      });
+      
+      const pdf = await loadingTask.promise;
+      console.log(`📄 PDF loaded: ${pdf.numPages} pages`);
+      
+      // Limit pages for memory efficiency (OCR is memory intensive)
+      const maxPages = Math.min(pdf.numPages, 10);
+      console.log(`📄 Processing ${maxPages} pages with OCR...`);
+      
+      let fullText = '';
+      
+      // Process each page
+      for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+        try {
+          console.log(`📄 Processing page ${pageNum}/${maxPages}...`);
+          
+          // Get page
+          const page = await pdf.getPage(pageNum);
+          
+          // Get viewport with scale for better OCR quality
+          const scale = 2.0; // Higher scale = better quality but slower
+          const viewport = page.getViewport({ scale });
+          
+          // Create canvas
+          const canvas = createCanvas(viewport.width, viewport.height);
+          const context = canvas.getContext('2d');
+          
+          // Render PDF page to canvas
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport
+          };
+          
+          await page.render(renderContext).promise;
+          
+          // Convert canvas to buffer for Tesseract
+          const imageBuffer = canvas.toBuffer('image/png');
+          
+          console.log(`🔍 Running OCR on page ${pageNum}...`);
+          
+          // Create worker for this page
+          const worker = await this.createWorker('eng', 1, {
+            logger: m => {
+              if (m.status === 'recognizing text') {
+                console.log(`Page ${pageNum} OCR Progress: ${(m.progress * 100).toFixed(0)}%`);
+              }
+            }
+          });
+          
+          // Run OCR on the rendered page
+          const { data: { text } } = await worker.recognize(imageBuffer);
+          await worker.terminate();
+          
+          console.log(`✅ Page ${pageNum} OCR complete: ${text.length} characters`);
+          
+          fullText += text + '\n\n';
+          
+          // Cleanup
+          page.cleanup();
+          
+        } catch (pageError) {
+          console.error(`❌ OCR failed for page ${pageNum}:`, pageError.message);
+          // Continue with other pages
+        }
+      }
+      
+      // Cleanup PDF document
+      pdf.destroy();
+      
+      if (fullText.trim().length === 0) {
+        throw new Error('OCR processing completed but no text was extracted from the PDF');
+      }
+      
+      console.log(`✅ PDF OCR complete: ${fullText.length} total characters from ${maxPages} pages`);
+      return fullText;
+      
+    } catch (error) {
+      console.error('❌ PDF OCR processing failed:', error);
+      throw new Error(`PDF OCR failed: ${error.message}`);
+    }
   }
 
   /**
