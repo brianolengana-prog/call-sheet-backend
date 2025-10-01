@@ -359,9 +359,8 @@ class CustomExtractionService {
       pdf.destroy();
 
       if (fullText.trim().length === 0) {
-        console.log('⚠️ PDF.js extracted 0 characters - trying AI Vision fallback...');
-        // Don't throw yet - let the catch block handle AI Vision fallback
-        throw new Error('No text content found in PDF - likely image-based or scanned');
+        console.log('⚠️ PDF.js extracted 0 characters - this PDF has no text layer');
+        throw new Error('This PDF appears to be image-based or scanned and has no searchable text layer. Please either: 1) Export your call sheet as a text-based PDF from your original software, 2) Use a different call sheet format, or 3) Contact support for OCR processing options.');
       }
 
       // CRITICAL: Validate that we got real text, not PDF garbage
@@ -383,7 +382,23 @@ class CustomExtractionService {
     } catch (error) {
       console.error('❌ PDF extraction failed:', error);
       
-      // Fallback: Try to extract text using a different method
+      // Fallback 1: Try pdf-parse library (more robust than PDF.js for text extraction)
+      try {
+        console.log('🔄 Attempting pdf-parse library extraction...');
+        const pdfParse = require('pdf-parse');
+        const data = await pdfParse(Buffer.from(fileBuffer));
+        
+        if (data.text && data.text.trim().length > 50) {
+          console.log(`✅ pdf-parse extracted ${data.text.length} characters from ${data.numpages} pages`);
+          console.log(`📄 First 200 chars: "${data.text.substring(0, 200)}..."`);
+          return data.text;
+        }
+        console.log('⚠️ pdf-parse returned insufficient text:', data.text.length, 'characters');
+      } catch (pdfParseError) {
+        console.error('❌ pdf-parse also failed:', pdfParseError.message);
+      }
+      
+      // Fallback 2: Try original fallback method
       try {
         console.log('🔄 Attempting fallback text extraction...');
         const fallbackText = await this.extractTextFromPDFFallback(fileBuffer);
@@ -395,19 +410,13 @@ class CustomExtractionService {
         console.error('❌ Fallback extraction also failed:', fallbackError);
       }
       
-      // ULTIMATE FALLBACK: Use GPT-4 Vision to read PDF as image
-      try {
-        console.log('🎨 ULTIMATE FALLBACK: Using GPT-4 Vision to read PDF...');
-        const visionText = await this.extractTextWithAIVision(fileBuffer);
-        if (visionText && visionText.length > 50) {
-          console.log('✅ AI Vision extraction successful:', visionText.length, 'characters');
-          return visionText;
-        }
-      } catch (visionError) {
-        console.error('❌ AI Vision also failed:', visionError.message);
+      // Check if this is the "no text layer" error
+      if (error.message.includes('no searchable text layer')) {
+        // Don't try vision fallback - give helpful error instead
+        throw new Error(error.message);
       }
       
-      throw new Error(`PDF text extraction failed: ${error.message}`);
+      throw new Error(`PDF text extraction failed: ${error.message}. This PDF may be image-based. Please use a text-based PDF or contact support for OCR options.`);
     }
   }
 
@@ -417,14 +426,30 @@ class CustomExtractionService {
    */
   async extractTextWithAIVision(fileBuffer) {
     try {
-      console.log('🎨 Using AI Vision to read PDF (no canvas needed)...');
+      console.log('🎨 Converting PDF to image for AI Vision...');
       
-      // Simply send the PDF as base64 - OpenAI handles it!
-      const base64PDF = Buffer.from(fileBuffer).toString('base64');
+      // Convert PDF to PNG images using pure JS library
+      const convert = require('pdf-img-convert');
       
-      console.log(`📄 PDF size: ${Math.round(base64PDF.length / 1024)}KB, sending to GPT-4 Vision...`);
+      // Convert first page to PNG
+      const pngPages = await convert(fileBuffer, {
+        width: 2000,  // High resolution for better OCR
+        height: 2000,
+        page_numbers: [1],  // Only first page
+        base64: false  // Get buffer
+      });
       
-      // Send to OpenAI GPT-4 Vision (can handle PDFs directly!)
+      if (!pngPages || pngPages.length === 0) {
+        throw new Error('PDF conversion produced no images');
+      }
+      
+      // Get first page as PNG buffer
+      const pngBuffer = pngPages[0];
+      const base64Image = Buffer.from(pngBuffer).toString('base64');
+      
+      console.log(`📄 Converted PDF page to PNG (${Math.round(base64Image.length / 1024)}KB), sending to GPT-4 Vision...`);
+      
+      // Send to OpenAI GPT-4 Vision
       const openaiApiKey = process.env.OPENAI_API_KEY;
       if (!openaiApiKey) {
         throw new Error('OPENAI_API_KEY not configured');
@@ -437,19 +462,20 @@ class CustomExtractionService {
           'Authorization': `Bearer ${openaiApiKey}`
         },
         body: JSON.stringify({
-          model: 'gpt-4o',  // Updated model that handles PDFs better
+          model: 'gpt-4o',
           messages: [
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'This is a call sheet PDF. Extract ALL text content from it. Return the raw text preserving names, phone numbers, emails, roles, and structure. Include every person listed with their contact information. Do not summarize - extract everything.'
+                  text: 'This is a call sheet image. Extract ALL text content from it. Return the raw text preserving names, phone numbers, emails, roles, and structure. Include every person listed with their contact information. Do not summarize - extract everything exactly as written.'
                 },
                 {
                   type: 'image_url',
                   image_url: {
-                    url: `data:application/pdf;base64,${base64PDF}`
+                    url: `data:image/png;base64,${base64Image}`,
+                    detail: 'high'
                   }
                 }
               ]
